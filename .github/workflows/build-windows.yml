@@ -52,11 +52,13 @@ jobs:
       - name: Package application (creates out\Nextcloud Talk-win32-x64)
         env:
           TALK_PATH: ${{ github.workspace }}\spreed
+          NODE_OPTIONS: --max-old-space-size=8192
         run: npm run build:windows:x64
 
       - name: Make Squirrel installer (.exe)
         env:
           TALK_PATH: ${{ github.workspace }}\spreed
+          NODE_OPTIONS: --max-old-space-size=8192
         run: npm run package:windows:x64:exe
 
       - name: Upload portable app (распакованное приложение)
