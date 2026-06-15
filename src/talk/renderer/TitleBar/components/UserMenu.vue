@@ -13,6 +13,7 @@ import { ref, useTemplateRef, watch } from 'vue'
 import NcAvatar from '@nextcloud/vue/components/NcAvatar'
 import NcPopover from '@nextcloud/vue/components/NcPopover'
 import NcUserStatusIcon from '@nextcloud/vue/components/NcUserStatusIcon'
+import IconAccountPlusOutline from 'vue-material-design-icons/AccountPlusOutline.vue'
 import IconCheck from 'vue-material-design-icons/Check.vue'
 import IconChevronLeft from 'vue-material-design-icons/ChevronLeft.vue'
 import IconChevronRight from 'vue-material-design-icons/ChevronRight.vue'
@@ -54,6 +55,7 @@ const userProfileLink = generateUrl('/u/{userid}', { userid: user.id })
 
 const logout = window.TALK_DESKTOP.logout
 const quit = window.TALK_DESKTOP.quit
+const addAccount = window.TALK_DESKTOP.addAccount
 
 /**
  * Handle user status type change
@@ -170,6 +172,13 @@ function handleUserStatusChange(status: UserStatusStatusType) {
 
 							<UiMenuSeparator />
 						</template>
+
+						<UiMenuItem tag="button" @click="addAccount">
+							<template #icon>
+								<IconAccountPlusOutline :size="20" />
+							</template>
+							{{ t('talk_desktop', 'Add account') }}
+						</UiMenuItem>
 
 						<UiMenuItem tag="button" @click="logout">
 							<template #icon>

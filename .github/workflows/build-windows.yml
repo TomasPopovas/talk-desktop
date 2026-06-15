@@ -1,0 +1,74 @@
+# .github/workflows/build-windows.yml
+#
+# Сборка Nextcloud Talk Desktop (с поддержкой нескольких аккаунтов) под Windows x64
+# в чистом окружении GitHub Actions, где интернет открыт и бинарник Electron
+# скачивается без проблем.
+#
+# КАК ИСПОЛЬЗОВАТЬ:
+# 1. Создай репозиторий на GitHub и запушь туда СВОЙ изменённый talk-desktop
+#    (исходники уже с применённым multi-account патчем, закоммиченные).
+# 2. Положи этот файл по пути .github/workflows/build-windows.yml и запушь.
+# 3. Вкладка Actions -> "Build Windows x64" -> Run workflow.
+# 4. После сборки скачай артефакты внизу страницы запуска:
+#       - talk-desktop-win32-x64-portable  -> распакованное приложение (Nextcloud Talk.exe)
+#       - talk-desktop-win32-x64-installer  -> установщик *Setup.exe (Squirrel)
+#
+# SPREED_REF: ветка/тег исходников Nextcloud Talk (spreed). Версия должна быть
+# СТРОГО ВЫШЕ 22.0.0-beta.1. По умолчанию master. Если на твоём сервере Talk 22 —
+# поставь stable22, и т.д. (для совпадения бандла фронтенда с API сервера).
+
+name: Build Windows x64
+
+on:
+  workflow_dispatch:
+    inputs:
+      spreed_ref:
+        description: "Ветка/тег spreed (Nextcloud Talk). Должна быть > 22.0.0-beta.1"
+        required: true
+        default: "master"
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout talk-desktop (твой форк с multi-account)
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install talk-desktop deps
+        run: npm ci
+
+      - name: Clone Nextcloud Talk (spreed) sources
+        run: git clone --depth 1 --branch ${{ github.event.inputs.spreed_ref }} https://github.com/nextcloud/spreed spreed
+
+      - name: Install spreed deps
+        run: npm ci --prefix=spreed
+
+      - name: Package application (creates out\Nextcloud Talk-win32-x64)
+        env:
+          TALK_PATH: ${{ github.workspace }}\spreed
+        run: npm run build:windows:x64
+
+      - name: Make Squirrel installer (.exe)
+        env:
+          TALK_PATH: ${{ github.workspace }}\spreed
+        run: npm run package:windows:x64:exe
+
+      - name: Upload portable app (распакованное приложение)
+        uses: actions/upload-artifact@v4
+        with:
+          name: talk-desktop-win32-x64-portable
+          path: out/Nextcloud Talk-win32-x64/**
+          if-no-files-found: error
+
+      - name: Upload installer (Setup.exe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: talk-desktop-win32-x64-installer
+          path: out/make/**
+          if-no-files-found: error

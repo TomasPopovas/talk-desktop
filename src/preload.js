@@ -163,11 +163,32 @@ const TALK_DESKTOP = {
 	 */
 	login: (appData) => ipcRenderer.invoke('authentication:login', appData),
 	/**
-	 * Logout and open accounts window
+	 * Logout the current account. Closes its window and, if it was the last
+	 * account, opens the authentication window.
 	 *
 	 * @return {Promise<void>}
 	 */
 	logout: () => ipcRenderer.invoke('authentication:logout'),
+	/**
+	 * Open the authentication window to add another account.
+	 * The new account runs simultaneously in its own isolated session.
+	 *
+	 * @return {Promise<void>}
+	 */
+	addAccount: () => ipcRenderer.invoke('accounts:add'),
+	/**
+	 * Get the list of currently logged-in accounts.
+	 *
+	 * @return {Promise<Array<{ id: string }>>}
+	 */
+	listAccounts: () => ipcRenderer.invoke('accounts:list'),
+	/**
+	 * Focus (and restore/recreate) the window of an account.
+	 *
+	 * @param {string} id - Account id
+	 * @return {Promise<void>}
+	 */
+	focusAccount: (id) => ipcRenderer.invoke('accounts:focus', id),
 	/**
 	 * Focus and restore the talk window
 	 *

@@ -6,17 +6,23 @@
 const { session } = require('electron')
 
 /**
- * Patch requests on the default session to use
+ * Patch requests on a session to inject the account's Basic-Auth credentials.
+ *
+ * The interceptor is registered on the provided session instead of always on
+ * the default session, so that several accounts - each running in its own
+ * session partition - can be authenticated independently at the same time.
  *
  * @param {string} serverUrl - Nextcloud server URL
  * @param {object} [options] - Patching options
- * @param {import('../accounts/login.service.js').Credentials} [options.credentials] - User credentials for the Authentication header
+ * @param {import('./accounts.service.ts').Account['appData']['credentials']} [options.credentials] - User credentials for the Authentication header
+ * @param {import('electron').Session} [options.session] - Target session (defaults to the default session)
  */
-function enableWebRequestInterceptor(serverUrl, { credentials } = {}) {
-	// Cleanup because Electron doesn't support an interceptor update
-	disableWebRequestInterceptor()
+function enableWebRequestInterceptor(serverUrl, { credentials, session: targetSession } = {}) {
+	const ses = targetSession || session.defaultSession
 
-	session.defaultSession.webRequest.onBeforeSendHeaders(
+	// Electron allows only a single onBeforeSendHeaders listener per session.
+	// Registering a new one replaces the previous, so there is no need to disable first.
+	ses.webRequest.onBeforeSendHeaders(
 		{
 			urls: [`${serverUrl}/*`],
 			// types: ['xhr', 'image', 'media', 'webSocket', 'ping'],
@@ -36,10 +42,13 @@ function enableWebRequestInterceptor(serverUrl, { credentials } = {}) {
 }
 
 /**
- * Disable any request patching on the default session
+ * Disable any request patching on a session.
+ *
+ * @param {import('electron').Session} [targetSession] - Target session (defaults to the default session)
  */
-function disableWebRequestInterceptor() {
-	session.defaultSession.webRequest.onBeforeSendHeaders(null)
+function disableWebRequestInterceptor(targetSession) {
+	const ses = targetSession || session.defaultSession
+	ses.webRequest.onBeforeSendHeaders(null)
 }
 
 module.exports = {

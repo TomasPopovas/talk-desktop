@@ -3,10 +3,21 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-const { app, ipcMain, desktopCapturer, systemPreferences, shell, session } = require('electron')
+const { app, ipcMain, desktopCapturer, systemPreferences, shell, session, BrowserWindow } = require('electron')
 const { default: mri } = require('mri')
 const { spawn } = require('node:child_process')
 const path = require('node:path')
+const { setAccountActions } = require('./app/accountActions.ts')
+const {
+	loadAccounts,
+	listAccounts,
+	getAccountById,
+	getAccountSession,
+	getAccountByWebContentsId,
+	upsertAccount,
+	removeAccount,
+	generateAccountPartition,
+} = require('./app/accounts.service.ts')
 const { setupMenu } = require('./app/app.menu.js')
 const { loadAppConfig, getAppConfig, setAppConfig } = require('./app/AppConfig.ts')
 const { appData } = require('./app/AppData.js')
@@ -82,8 +93,10 @@ ipcMain.handle('app:getSystemL10n', () => ({
 	// Note: Linux may have C (POSIX) locale, which results in an empty preferred languages list
 	language: app.getPreferredSystemLanguages()[0]?.replace('-', '_') ?? 'en_US',
 }))
-ipcMain.handle('app:enableWebRequestInterceptor', (event, ...args) => enableWebRequestInterceptor(...args))
-ipcMain.handle('app:disableWebRequestInterceptor', (event, ...args) => disableWebRequestInterceptor(...args))
+// The interceptor is applied to the session of the calling window, so that
+// every account (each running in its own session partition) is authenticated independently.
+ipcMain.handle('app:enableWebRequestInterceptor', (event, serverUrl, options = {}) => enableWebRequestInterceptor(serverUrl, { ...options, session: event.sender.session }))
+ipcMain.handle('app:disableWebRequestInterceptor', (event) => disableWebRequestInterceptor(event.sender.session))
 ipcMain.handle('app:setBadgeCount', async (event, count) => app.setBadgeCount(count))
 ipcMain.on('app:relaunch', () => relaunchApp())
 ipcMain.handle('app:config:get', (event, key) => getAppConfig(key))
@@ -164,8 +177,30 @@ app.whenReady().then(async () => {
 		console.log()
 	}
 
-	// TODO: add windows manager
+	loadAccounts()
+
+	// ---------------------------------------------------------------------------
+	// Multi-account window manager
+	// ---------------------------------------------------------------------------
+
 	/**
+	 * Open talk windows, keyed by account id.
+	 *
+	 * @type {Map<string, import('electron').BrowserWindow>}
+	 */
+	const talkWindows = new Map()
+
+	/**
+	 * Auth windows that are in the "add account" flow, mapped to their forced partition.
+	 *
+	 * @type {Map<number, string|null>}
+	 */
+	const pendingAuthPartitions = new Map()
+
+	/**
+	 * The current bootstrap window (welcome / authentication) or the legacy "main" window.
+	 * Kept for the welcome bootstrap and the focus/activate fallbacks.
+	 *
 	 * @type {import('electron').BrowserWindow}
 	 */
 	let mainWindow
@@ -174,28 +209,159 @@ app.whenReady().then(async () => {
 	setupMenu()
 
 	/**
-	 * Focus the main window. Restore/re-create it if needed.
+	 * Rebuild the application menu (e.g. when the accounts list changes).
+	 */
+	function rebuildAppMenu() {
+		setupMenu()
+	}
+
+	/**
+	 * Get any open talk window, if any.
+	 *
+	 * @return {import('electron').BrowserWindow|null}
+	 */
+	function getAnyTalkWindow() {
+		for (const win of talkWindows.values()) {
+			if (win && !win.isDestroyed()) {
+				return win
+			}
+		}
+		return null
+	}
+
+	/**
+	 * Open (or focus) the talk window for an account.
+	 *
+	 * @param {import('./app/accounts.service.ts').Account} account - Account
+	 * @param {object} [options] - Options
+	 * @param {boolean} [options.background] - Do not show the window after creation
+	 * @return {import('electron').BrowserWindow}
+	 */
+	function openAccountTalkWindow(account, { background = false } = {}) {
+		const existing = talkWindows.get(account.id)
+		if (existing && !existing.isDestroyed()) {
+			existing.show()
+			return existing
+		}
+
+		// (Re)enable the request interceptor on this account's session
+		enableWebRequestInterceptor(account.appData.serverUrl, {
+			credentials: account.appData.credentials,
+			session: getAccountSession(account),
+		})
+
+		const win = createTalkWindow(account)
+		talkWindows.set(account.id, win)
+		win.on('closed', () => {
+			if (talkWindows.get(account.id) === win) {
+				talkWindows.delete(account.id)
+			}
+		})
+		onReadyToShow(win, () => {
+			if (!background) {
+				win.show()
+			}
+		})
+		return win
+	}
+
+	/**
+	 * Focus the window of an account, recreating it if needed.
+	 *
+	 * @param {string} id - Account id
+	 */
+	function focusAccount(id) {
+		const account = getAccountById(id)
+		if (!account) {
+			return
+		}
+		const win = talkWindows.get(id)
+		if (win && !win.isDestroyed()) {
+			if (win.isMinimized()) {
+				win.restore()
+			}
+			win.show()
+			win.focus()
+			return
+		}
+		const created = openAccountTalkWindow(account)
+		onReadyToShow(created, () => created.show())
+	}
+
+	/**
+	 * Open the authentication window to add another account in an isolated session.
+	 */
+	function addAccount() {
+		const partition = generateAccountPartition()
+		const authWindow = createAuthenticationWindow({ partition })
+		pendingAuthPartitions.set(authWindow.webContents.id, partition)
+		authWindow.on('closed', () => pendingAuthPartitions.delete(authWindow.webContents.id))
+		onReadyToShow(authWindow, () => authWindow.show())
+	}
+
+	/**
+	 * Log out an account: close its window, wipe its session and registry entry.
+	 * If no accounts remain, show the authentication window.
+	 *
+	 * @param {string} id - Account id
+	 */
+	async function logoutAccountById(id) {
+		const account = getAccountById(id)
+		if (!account) {
+			return
+		}
+		const accountSession = getAccountSession(account)
+		const win = talkWindows.get(id)
+
+		await removeAccount(id)
+		disableWebRequestInterceptor(accountSession)
+		app.setBadgeCount(0)
+
+		if (win && !win.isDestroyed()) {
+			talkWindows.delete(id)
+			win.destroy()
+		}
+
+		rebuildAppMenu()
+
+		// If that was the last account, return to the authentication window
+		if (listAccounts().length === 0) {
+			const authWindow = createAuthenticationWindow()
+			mainWindow = authWindow
+			createMainWindow = createAuthenticationWindow
+			onReadyToShow(authWindow, () => authWindow.show())
+		}
+	}
+
+	// Wire up tray/menu actions
+	setAccountActions({
+		addAccount,
+		focusAccount,
+		logoutAccount: logoutAccountById,
+	})
+
+	/**
+	 * Focus a window. Restore/re-create it if needed.
 	 */
 	function focusMainWindow() {
-		// There is no main window at all, the app is not initialized yet - ignore
-		if (!createMainWindow) {
+		const win = getAnyTalkWindow() || (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null)
+
+		if (win) {
+			if (win.isMinimized()) {
+				win.restore()
+			}
+			win.show()
 			return
 		}
 
-		// There is no window (possible on macOS) - create
-		if (!mainWindow || mainWindow.isDestroyed()) {
+		// No window at all - recreate the primary one, if there is an account
+		const accounts = listAccounts()
+		if (accounts.length > 0) {
+			focusAccount(accounts[0].id)
+		} else if (createMainWindow) {
 			mainWindow = createMainWindow()
 			onReadyToShow(mainWindow, () => mainWindow.show())
-			return
 		}
-
-		// The window is minimized - restore
-		if (mainWindow.isMinimized()) {
-			mainWindow.restore()
-		}
-
-		// Show the window in case it is hidden in the system tray and focus it
-		mainWindow.show()
 	}
 
 	/**
@@ -250,31 +416,53 @@ app.whenReady().then(async () => {
 
 		const welcomeWindow = mainWindow
 
+		// Register/refresh the primary account (default session) from the welcome bootstrap
 		if (appData.credentials) {
-			// User is authenticated - setup and start main window
-			enableWebRequestInterceptor(appData.serverUrl, {
-				credentials: appData.credentials,
-			})
-			mainWindow = createTalkWindow()
-			createMainWindow = createTalkWindow
+			upsertAccount(appData.toJSON(), { forcePartition: null })
+		}
+
+		const allAccounts = listAccounts()
+
+		if (allAccounts.length > 0) {
+			// Open a talk window for every known account, each in its own session
+			for (const account of allAccounts) {
+				openAccountTalkWindow(account, { background: openInBackground })
+			}
+			rebuildAppMenu()
+
+			// Keep a reference to the primary window for legacy focus paths
+			mainWindow = getAnyTalkWindow() ?? welcomeWindow
+			createMainWindow = createWelcomeWindow
+
+			welcomeWindow.close()
 		} else {
 			// User is unauthenticated - start login window
 			await welcomeWindow.webContents.session.clearStorageData()
-			mainWindow = createAuthenticationWindow()
+			const authWindow = createAuthenticationWindow()
+			mainWindow = authWindow
 			createMainWindow = createAuthenticationWindow
+			onReadyToShow(authWindow, () => {
+				authWindow.show()
+				welcomeWindow.close()
+			})
 		}
-
-		onReadyToShow(mainWindow, () => {
-			// Do not show the main window if it is the Talk Window opened in the background
-			const isTalkWindow = createMainWindow === createTalkWindow
-			if (!isTalkWindow || !openInBackground) {
-				mainWindow.show()
-			}
-			welcomeWindow.close()
-		})
 	})
 
-	ipcMain.handle('appData:get', () => appData.toJSON())
+	ipcMain.handle('appData:get', (event) => {
+		const account = getAccountByWebContentsId(event.sender.id)
+		if (account) {
+			// For isolated (secondary) accounts restored from disk, force a metadata
+			// refresh on load since they did not go through the welcome refetch.
+			const forceRefetch = account.partition !== null
+			return { ...account.appData, talkHashDirty: forceRefetch ? true : account.appData.talkHashDirty }
+		}
+		return appData.toJSON()
+	})
+
+	// Accounts IPC
+	ipcMain.handle('accounts:add', () => addAccount())
+	ipcMain.handle('accounts:list', () => listAccounts().map((account) => ({ id: account.id, partition: account.partition })))
+	ipcMain.handle('accounts:focus', (event, id) => focusAccount(id))
 
 	let macDockBounceId
 	ipcMain.on('talk:flashAppIcon', async (event, shouldFlash) => {
@@ -290,34 +478,67 @@ app.whenReady().then(async () => {
 				macDockBounceId = app.dock.bounce()
 			}
 		} else {
-			// TODO: check if flashFrame also works on Mac since Electron 31
-			mainWindow.flashFrame(shouldFlash)
+			// Flash the window that requested it
+			const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+			if (win && !win.isDestroyed()) {
+				win.flashFrame(shouldFlash)
+			}
 		}
 	})
 
-	ipcMain.handle('talk:focus', async () => focusMainWindow())
-
-	ipcMain.handle('authentication:openLoginWebView', async (event, serverUrl, user) => openLoginWebView(mainWindow, serverUrl, user))
-
-	ipcMain.handle('authentication:login', async (event, newAppData) => {
-		appData.fromJSON(newAppData)
-		mainWindow.close()
-		mainWindow = createTalkWindow()
-		createMainWindow = createTalkWindow
-		onReadyToShow(mainWindow, () => mainWindow.show())
+	ipcMain.handle('talk:focus', async (event) => {
+		const account = getAccountByWebContentsId(event.sender.id)
+		if (account) {
+			focusAccount(account.id)
+		} else {
+			focusMainWindow()
+		}
 	})
 
-	ipcMain.handle('authentication:logout', async () => {
-		if (createMainWindow === createTalkWindow) {
-			appData.reset()
-			await mainWindow.webContents.session.clearStorageData()
-			app.setBadgeCount(0)
-			const authenticationWindow = createAuthenticationWindow()
-			createMainWindow = createAuthenticationWindow
-			onReadyToShow(authenticationWindow, () => authenticationWindow.show())
+	ipcMain.handle('authentication:openLoginWebView', async (event, serverUrl, user) => {
+		const parent = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+		return openLoginWebView(parent, serverUrl, user)
+	})
 
-			mainWindow.destroy()
-			mainWindow = authenticationWindow
+	ipcMain.handle('authentication:login', async (event, newAppData) => {
+		// Determine whether this is the "add account" flow (isolated partition)
+		// or the primary first-run login (default session).
+		const hasPending = pendingAuthPartitions.has(event.sender.id)
+		const forcePartition = hasPending ? pendingAuthPartitions.get(event.sender.id) : null
+		pendingAuthPartitions.delete(event.sender.id)
+
+		const account = upsertAccount(newAppData, { forcePartition })
+
+		// Keep the legacy global appData in sync for the primary account
+		if (account.partition === null) {
+			appData.fromJSON(newAppData)
+		}
+
+		// Ensure the interceptor is active on this account's session
+		enableWebRequestInterceptor(account.appData.serverUrl, {
+			credentials: account.appData.credentials,
+			session: getAccountSession(account),
+		})
+
+		const authWindow = BrowserWindow.fromWebContents(event.sender)
+
+		const talkWindow = openAccountTalkWindow(account)
+		onReadyToShow(talkWindow, () => talkWindow.show())
+
+		// The newly created talk window becomes the reference main window
+		mainWindow = talkWindow
+
+		rebuildAppMenu()
+
+		if (authWindow && !authWindow.isDestroyed() && authWindow !== talkWindow) {
+			authWindow.close()
+		}
+	})
+
+	ipcMain.handle('authentication:logout', async (event) => {
+		const account = getAccountByWebContentsId(event.sender.id)
+		if (account) {
+			await logoutAccountById(account.id)
 		}
 	})
 
@@ -325,41 +546,63 @@ app.whenReady().then(async () => {
 		createCallboxWindow(callboxParams)
 	})
 
-	ipcMain.handle('help:show', () => {
-		createHelpWindow(mainWindow)
+	ipcMain.handle('help:show', (event) => {
+		const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+		createHelpWindow(win)
 	})
 
-	ipcMain.handle('upgrade:show', () => {
+	ipcMain.handle('upgrade:show', (event) => {
+		const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+		const account = getAccountByWebContentsId(event.sender.id)
 		const upgradeWindow = createUpgradeWindow()
-		createMainWindow = createUpgradeWindow
-
-		mainWindow.destroy()
+		if (account && talkWindows.get(account.id) === win) {
+			talkWindows.delete(account.id)
+		}
+		if (win && !win.isDestroyed()) {
+			win.destroy()
+		}
 		mainWindow = upgradeWindow
+		onReadyToShow(upgradeWindow, () => upgradeWindow.show())
 	})
 
-	ipcMain.on('app:relaunchWindow', () => {
+	ipcMain.on('app:relaunchWindow', (event) => {
+		const win = BrowserWindow.fromWebContents(event.sender)
+		const account = getAccountByWebContentsId(event.sender.id)
 		isInWindowRelaunch = true
-		mainWindow.destroy()
-		mainWindow = createMainWindow()
-		onReadyToShow(mainWindow, () => mainWindow.show())
+		if (win && !win.isDestroyed()) {
+			if (account) {
+				talkWindows.delete(account.id)
+			}
+			win.destroy()
+		}
+		if (account) {
+			const recreated = openAccountTalkWindow(account)
+			onReadyToShow(recreated, () => recreated.show())
+			mainWindow = recreated
+		} else {
+			mainWindow = createMainWindow()
+			onReadyToShow(mainWindow, () => mainWindow.show())
+		}
 		isInWindowRelaunch = false
 	})
 
-	ipcMain.on('app:downloadURL', (event, url, filename) => triggerDownloadUrl(mainWindow, url, filename))
+	ipcMain.on('app:downloadURL', (event, url, filename) => {
+		const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+		triggerDownloadUrl(win, url, filename)
+	})
 
-	ipcMain.handle('certificate:verify', (event, url) => verifyCertificate(mainWindow, url))
+	ipcMain.handle('certificate:verify', (event, url) => {
+		const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow
+		return verifyCertificate(win, url)
+	})
 
 	// Click on the dock icon on macOS
 	app.on('activate', () => {
-		if (mainWindow && !mainWindow.isDestroyed()) {
-			// Show the main window if it exists but hidden (not closed), e.g., minimized to the system tray
-			mainWindow.show()
+		const win = getAnyTalkWindow() || (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null)
+		if (win) {
+			win.show()
 		} else {
-			// On macOS, it is common to re-create a window in the app when the
-			// dock icon is clicked and there are no other windows open.
-			// See window-all-closed event handler.
-			mainWindow = createMainWindow()
-			onReadyToShow(mainWindow, () => mainWindow.show())
+			focusMainWindow()
 		}
 	})
 })

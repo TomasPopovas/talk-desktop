@@ -4,6 +4,7 @@
  */
 
 const { BrowserWindow } = require('electron')
+const { bindWebContentsToAccount, unbindWebContents } = require('../app/accounts.service.ts')
 const { setupTray } = require('../app/app.tray.js')
 const { getAppConfig } = require('../app/AppConfig.ts')
 const { applyContextMenu } = require('../app/applyContextMenu.js')
@@ -16,13 +17,21 @@ const { BUILD_CONFIG } = require('../shared/build.config.ts')
 const { getBrowserWindowIcon } = require('../shared/icons.utils.js')
 
 /**
+ * Create a Talk window for an account.
+ *
+ * @param {import('../app/accounts.service.ts').Account} [account] - Account to bind the window to.
+ *        When omitted, the window uses the default session (legacy single-account behaviour).
  * @return {import('electron').BrowserWindow}
  */
-function createTalkWindow() {
+function createTalkWindow(account) {
 	const zoomFactor = getAppConfig('zoomFactor')
 
+	// Show the account id in the title when there is more than one account
+	const accountLabel = account?.id ? account.id : undefined
+	const title = accountLabel ? buildTitle(accountLabel) : buildTitle()
+
 	const talkWindowOptions = {
-		title: buildTitle(),
+		title,
 		...getScaledWindowMinSize({
 			minWidth: 600,
 			minHeight: 400,
@@ -32,6 +41,9 @@ function createTalkWindow() {
 		webPreferences: {
 			preload: TALK_DESKTOP__WINDOW_TALK_PRELOAD_WEBPACK_ENTRY,
 			zoomFactor,
+			// Isolate the account into its own persistent session.
+			// `undefined` keeps the default session for the primary account.
+			...(account?.partition ? { partition: account.partition } : {}),
 		},
 		icon: getBrowserWindowIcon(),
 		titleBarStyle: getAppConfig('systemTitleBar') ? 'default' : 'hidden',
@@ -56,6 +68,13 @@ function createTalkWindow() {
 		show: false,
 	})
 
+	// Bind this window's webContents to its account so the renderer receives
+	// the correct appData via the `appData:get` IPC handler.
+	if (account) {
+		bindWebContentsToAccount(window.webContents.id, account)
+		window.on('closed', () => unbindWebContents(window.webContents.id))
+	}
+
 	// TODO: return it on release
 	/*
 	if (process.env.NODE_ENV === 'production') {
@@ -76,7 +95,7 @@ function createTalkWindow() {
 	applyWheelZoom(window)
 	applyZoom(window)
 
-	setupTray(window)
+	setupTray(window, account)
 
 	window.loadURL(getWindowUrl('talk') + '#/apps/spreed')
 

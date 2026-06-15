@@ -11,9 +11,13 @@ const { TITLE_BAR_HEIGHT } = require('../constants.js')
 const { getBrowserWindowIcon } = require('../shared/icons.utils.js')
 
 /**
+ * @param {object} [options] - Options
+ * @param {string|null} [options.partition] - Isolated session partition for the "add account" flow.
+ *        When set, the login is performed in a dedicated session so it does not
+ *        interfere with already logged-in accounts.
  * @return {import('electron').BrowserWindow}
  */
-function createAuthenticationWindow() {
+function createAuthenticationWindow({ partition } = {}) {
 	const zoomFactor = getAppConfig('zoomFactor')
 	const window = new BrowserWindow({
 		title: buildTitle(),
@@ -28,6 +32,7 @@ function createAuthenticationWindow() {
 		autoHideMenuBar: true,
 		webPreferences: {
 			preload: TALK_DESKTOP__WINDOW_AUTHENTICATION_PRELOAD_WEBPACK_ENTRY,
+			...(partition ? { partition } : {}),
 		},
 		icon: getBrowserWindowIcon(),
 		titleBarStyle: getAppConfig('systemTitleBar') ? 'default' : 'hidden',

@@ -7,6 +7,8 @@ const { app, shell, Menu } = require('electron')
 const packageJson = require('../../package.json')
 const { createHelpWindow } = require('../help/help.window.js')
 const { BUILD_CONFIG } = require('../shared/build.config.ts')
+const { requestAddAccount, requestFocusAccount, requestLogoutAccount } = require('./accountActions.ts')
+const { listAccounts } = require('./accounts.service.ts')
 const { isMac } = require('./system.utils.ts')
 const { increaseZoom, decreaseZoom, setZoom } = require('./zoom.service.ts')
 
@@ -108,6 +110,39 @@ function setupMenu() {
 		},
 	})
 
+	// Accounts menu - switch between, add and log out of accounts
+	const accounts = listAccounts()
+	const accountsSubmenu = []
+	if (accounts.length > 0) {
+		for (const account of accounts) {
+			accountsSubmenu.push({
+				label: account.id,
+				click: () => requestFocusAccount(account.id),
+			})
+		}
+		accountsSubmenu.push({ type: 'separator' })
+	}
+	accountsSubmenu.push({
+		label: 'Add Account…',
+		click: () => requestAddAccount(),
+	})
+	if (accounts.length > 0) {
+		accountsSubmenu.push(
+			{ type: 'separator' },
+			{
+				label: 'Log Out',
+				submenu: accounts.map((account) => ({
+					label: account.id,
+					click: () => requestLogoutAccount(account.id),
+				})),
+			},
+		)
+	}
+	const accountsMenu = {
+		label: 'Accounts',
+		submenu: accountsSubmenu,
+	}
+
 	const helpMenu = {
 		role: 'help',
 		submenu: [
@@ -144,6 +179,8 @@ function setupMenu() {
 		viewMenu,
 		// { role: 'windowMenu' }
 		windowMenu,
+		// Accounts
+		accountsMenu,
 		// { role: 'help' }
 		helpMenu,
 	]
