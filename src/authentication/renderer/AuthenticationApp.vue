@@ -21,8 +21,10 @@ import { getCapabilities } from '../../shared/ocs.service.js'
 const channel = __CHANNEL__
 const version = __VERSION_TAG__
 
-// Pre-fill server url and the user with the last used one
-const prefilledAccount = getAppConfigValue('accounts')?.[0] ?? ''
+// In the "add account" flow (?add=1) start with an empty form so the user
+// can enter a different server. Otherwise pre-fill with the last used account.
+const isAddMode = new URLSearchParams(window.location.search).has('add')
+const prefilledAccount = isAddMode ? '' : (getAppConfigValue('accounts')?.[0] ?? '')
 const atIndex = prefilledAccount.lastIndexOf('@')
 let [prefilledServer, prefilledUser] = atIndex === -1
 	? [prefilledAccount, '']
@@ -177,7 +179,15 @@ async function login() {
 
 	const userid = credentials.user
 	const serverUrlWithoutProtocol = serverUrl.value.replace(/^https?:\/\//, '')
-	setAppConfigValue('accounts', [`${userid}@${serverUrlWithoutProtocol}`])
+	const newAccount = `${userid}@${serverUrlWithoutProtocol}`
+	// Keep the "last used" hints: in add mode append/move-to-front without
+	// dropping the already logged-in account, otherwise just store this one.
+	if (isAddMode) {
+		const existing = (getAppConfigValue('accounts') ?? []).filter((a) => a !== newAccount)
+		setAppConfigValue('accounts', [newAccount, ...existing])
+	} else {
+		setAppConfigValue('accounts', [newAccount])
+	}
 
 	setSuccess()
 	await window.TALK_DESKTOP.login(appData.toJSON())
