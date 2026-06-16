@@ -189,12 +189,45 @@ export function getAccountById(id: string): Account | undefined {
 }
 
 /**
+ * Sessions that already had their permission handlers configured.
+ */
+const configuredSessions = new WeakSet<Session>()
+
+/**
+ * Grant media and related permissions for an account session.
+ *
+ * Each secondary account runs in its own isolated session (partition). Unlike
+ * the default session, a fresh partition does not have permission handlers, so
+ * camera/microphone access (getUserMedia) and device enumeration silently fail
+ * or hang. Configure the handlers once per session to grant what Talk needs.
+ *
+ * @param ses - Session to configure
+ */
+function configureAccountSession(ses: Session): void {
+	if (configuredSessions.has(ses)) {
+		return
+	}
+	configuredSessions.add(ses)
+
+	ses.setPermissionRequestHandler((_webContents, _permission, callback) => {
+		callback(true)
+	})
+	ses.setPermissionCheckHandler(() => true)
+	// Device selection (camera/microphone/speakers) for getUserMedia
+	if (typeof ses.setDevicePermissionHandler === 'function') {
+		ses.setDevicePermissionHandler(() => true)
+	}
+}
+
+/**
  * Resolve the Electron session that belongs to an account.
  *
  * @param account - Account
  */
 export function getAccountSession(account: Account): Session {
-	return account.partition ? session.fromPartition(account.partition) : session.defaultSession
+	const ses = account.partition ? session.fromPartition(account.partition) : session.defaultSession
+	configureAccountSession(ses)
+	return ses
 }
 
 /**

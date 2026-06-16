@@ -72,17 +72,25 @@ function setupTray(browserWindow, account) {
 	const tray = new Tray(icon)
 	tray.setToolTip(account?.id ? `${app.name} — ${account.id}` : app.name)
 	tray.setContextMenu(buildTrayMenu(browserWindow, account))
-	tray.on('click', () => browserWindow.show())
+
+	const showWindow = () => {
+		if (!browserWindow.isDestroyed()) {
+			browserWindow.show()
+		}
+	}
+	tray.on('click', showWindow)
 
 	browserWindow.on('close', (event) => {
-		if (!isAppQuitting) {
+		if (!isAppQuitting && !browserWindow.isDestroyed()) {
 			event.preventDefault()
 			browserWindow.hide()
 		}
 	})
 
 	browserWindow.on('closed', () => {
-		tray.destroy()
+		if (!tray.isDestroyed()) {
+			tray.destroy()
+		}
 	})
 
 	return tray

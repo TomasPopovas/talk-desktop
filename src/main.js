@@ -392,18 +392,26 @@ app.whenReady().then(async () => {
 		}
 	})
 
+	// Resolve a window that is safe to use as a dialog parent.
+	// `mainWindow` may already be destroyed when a certificate prompt fires
+	// (e.g. while windows are being closed), which would crash the main process.
+	const getLiveParentWindow = () => {
+		const candidate = getAnyTalkWindow() ?? mainWindow
+		return candidate && !candidate.isDestroyed() ? candidate : undefined
+	}
+
 	// Allow requests to a server with accepted untrusted certificate
 	// Note: the result of this verification is cached by domain in Electron
 	// There is no way to clean the cache except by restarting the app
 	session.defaultSession.setCertificateVerifyProc(async (request, callback) => {
-		const isAccepted = request.errorCode === 0 || await promptCertificateTrust(mainWindow, request)
+		const isAccepted = request.errorCode === 0 || await promptCertificateTrust(getLiveParentWindow(), request)
 		callback(isAccepted ? 0 : -3)
 	})
 
 	// Allow web-view with accepted untrusted certificate (Login Flow)
 	app.on('certificate-error', async (event, webContents, url, error, certificate, callback) => {
 		event.preventDefault()
-		const isAccepted = await promptCertificateTrust(mainWindow, { hostname: new URL(url).hostname, certificate, verificationResult: error })
+		const isAccepted = await promptCertificateTrust(getLiveParentWindow(), { hostname: new URL(url).hostname, certificate, verificationResult: error })
 		callback(isAccepted)
 	})
 
