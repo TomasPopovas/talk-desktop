@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { app, net, protocol } from 'electron'
+import { app, net, protocol, session } from 'electron'
 import type { Session } from 'electron'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -37,50 +37,57 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 /**
- * Handle an https request: serve the app's own UI from local files for
- * internal URLs, proxy everything else to the real destination.
+ * Create an https request handler bound to a specific session. Internal URLs
+ * are served from local files; everything else is proxied to the real
+ * destination THROUGH THE SAME SESSION (ses.fetch) so that the session's
+ * request interceptor (which injects the account's Authorization header) runs.
+ * Using the global net.fetch here would route the request through the default
+ * session and drop the secondary account's credentials.
  *
- * @param request - Intercepted request
+ * @param ses - Session this handler is registered on
  */
-async function handleAppProtocolRequest(request: Request): Promise<Response> {
-	const url = new URL(request.url)
+function createAppProtocolHandler(ses: Session) {
+	return async (request: Request): Promise<Response> => {
+		const url = new URL(request.url)
 
-	// Override default Electron's User-Agent
-	// Note: it is supposed to work via webRequest.onBeforeSendHeaders (according to the Electron documentation)
-	// But for User-Agent header in net.fetch request it does not...
-	request.headers.set('User-Agent', USER_AGENT)
+		// Override default Electron's User-Agent
+		// Note: it is supposed to work via webRequest.onBeforeSendHeaders (according to the Electron documentation)
+		// But for User-Agent header in net.fetch request it does not...
+		request.headers.set('User-Agent', USER_AGENT)
 
-	// Handle internal application resource
-	if (isInternalUrl(url)) {
-		// In development mode proxy requests to the dev server
-		if (process.env.NODE_ENV === 'development') {
-			return net.fetch(DEV_SERVER_ORIGIN + url.pathname + url.search + url.hash, { bypassCustomProtocolHandlers: true })
+		// Handle internal application resource
+		if (isInternalUrl(url)) {
+			// In development mode proxy requests to the dev server
+			if (process.env.NODE_ENV === 'development') {
+				return net.fetch(DEV_SERVER_ORIGIN + url.pathname + url.search + url.hash, { bypassCustomProtocolHandlers: true })
+			}
+
+			const distPath = getDistPath()
+			const requestPath = path.join(distPath, decodeURIComponent(url.pathname))
+
+			// Prevent accessing external files via https://app/../../path/to/external/file
+			// Note: it is not supposed to happen with asar package but still better to check
+			const relativePath = path.relative(distPath, requestPath)
+			if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+				console.warn(`Unsafe path requested: ${requestPath}`)
+				return new Response(`Cannot GET ${request.url}`, { status: 404 })
+			}
+
+			// Open file://path/to/app/file?query#hash
+			return net.fetch(pathToFileURL(requestPath).toString() + url.search + url.hash)
 		}
 
-		const distPath = getDistPath()
-		const requestPath = path.join(distPath, decodeURIComponent(url.pathname))
-
-		// Prevent accessing external files via https://app/../../path/to/external/file
-		// Note: it is not supposed to happen with asar package but still better to check
-		const relativePath = path.relative(distPath, requestPath)
-		if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
-			console.warn(`Unsafe path requested: ${requestPath}`)
-			return new Response(`Cannot GET ${request.url}`, { status: 404 })
-		}
-
-		// Open file://path/to/app/file?query#hash
-		return net.fetch(pathToFileURL(requestPath).toString() + url.search + url.hash)
+		// Proxy the request to the original destination on THIS session so the
+		// per-session Authorization interceptor applies.
+		return ses.fetch(request, { bypassCustomProtocolHandlers: true })
 	}
-
-	// Proxy the request to the original destination
-	return net.fetch(request, { bypassCustomProtocolHandlers: true })
 }
 
 /**
  * Register app protocol handler on the default session
  */
 export function registerAppProtocolHandler() {
-	protocol.handle('https', handleAppProtocolRequest)
+	protocol.handle('https', createAppProtocolHandler(session.defaultSession))
 }
 
 /**
@@ -94,7 +101,7 @@ export function registerAppProtocolHandler() {
  * @param ses - Session to register the handler on
  */
 export function registerAppProtocolHandlerForSession(ses: Session) {
-	ses.protocol.handle('https', handleAppProtocolRequest)
+	ses.protocol.handle('https', createAppProtocolHandler(ses))
 }
 
 let distPath: string
