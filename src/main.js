@@ -299,8 +299,12 @@ app.whenReady().then(async () => {
 		// from the real server instead of local files.
 		prepareAccountSession(partition)
 		const authWindow = createAuthenticationWindow({ partition })
-		pendingAuthPartitions.set(authWindow.webContents.id, partition)
-		authWindow.on('closed', () => pendingAuthPartitions.delete(authWindow.webContents.id))
+		// Capture the id before the window is destroyed — accessing
+		// `authWindow.webContents` inside the `closed` handler would throw
+		// "Object has been destroyed".
+		const authWebContentsId = authWindow.webContents.id
+		pendingAuthPartitions.set(authWebContentsId, partition)
+		authWindow.on('closed', () => pendingAuthPartitions.delete(authWebContentsId))
 		onReadyToShow(authWindow, () => authWindow.show())
 	}
 

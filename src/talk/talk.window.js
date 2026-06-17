@@ -71,8 +71,12 @@ function createTalkWindow(account) {
 	// Bind this window's webContents to its account so the renderer receives
 	// the correct appData via the `appData:get` IPC handler.
 	if (account) {
-		bindWebContentsToAccount(window.webContents.id, account)
-		window.on('closed', () => unbindWebContents(window.webContents.id))
+		// Capture the id up front: in the `closed` handler the window is already
+		// destroyed and accessing `window.webContents` would throw
+		// "Object has been destroyed" and crash the main process.
+		const webContentsId = window.webContents.id
+		bindWebContentsToAccount(webContentsId, account)
+		window.on('closed', () => unbindWebContents(webContentsId))
 	}
 
 	// TODO: return it on release
