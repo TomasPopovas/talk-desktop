@@ -9,10 +9,11 @@ import type { UserStatusStatusType } from '../../UserStatus/userStatus.types.ts'
 import { t } from '@nextcloud/l10n'
 import { generateUrl } from '@nextcloud/router'
 import { storeToRefs } from 'pinia'
-import { ref, useTemplateRef, watch } from 'vue'
+import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
 import NcAvatar from '@nextcloud/vue/components/NcAvatar'
 import NcPopover from '@nextcloud/vue/components/NcPopover'
 import NcUserStatusIcon from '@nextcloud/vue/components/NcUserStatusIcon'
+import IconAccountOutline from 'vue-material-design-icons/AccountOutline.vue'
 import IconAccountPlusOutline from 'vue-material-design-icons/AccountPlusOutline.vue'
 import IconCheck from 'vue-material-design-icons/Check.vue'
 import IconChevronLeft from 'vue-material-design-icons/ChevronLeft.vue'
@@ -44,10 +45,44 @@ const userMenuContainer = useTemplateRef('userMenuContainer')
 const isUserStatusDialogOpen = ref(false)
 const userStatusSubMenuOpen = ref(false)
 
-// Close the submenu before opening the menu
+// --- Multi-account switcher ------------------------------------------------
+// Stable id of THIS window's account, in the same `user@host` format the main
+// process uses (see accountIdFromAppData), so we can exclude it from the list.
+const currentAccountId = `${(appData.credentials! as { user: string }).user}@${serverUrlShort}`
+type AccountListEntry = { id: string, partition: string | null }
+const accounts = ref<AccountListEntry[]>([])
+// All known accounts except the one this window already shows.
+const otherAccounts = computed(() => accounts.value.filter((account) => account.id !== currentAccountId))
+
+/**
+ * Load the list of logged-in accounts from the main process.
+ */
+async function refreshAccounts() {
+	try {
+		accounts.value = await window.TALK_DESKTOP.listAccounts()
+	} catch (error) {
+		console.error('Failed to load accounts for the user menu', error)
+	}
+}
+
+/**
+ * Switch to another account's window (creating/restoring it if needed).
+ *
+ * @param id - Account id
+ */
+function switchAccount(id: string) {
+	isOpen.value = false
+	window.TALK_DESKTOP.focusAccount(id)
+}
+
+onMounted(refreshAccounts)
+
+// Close the submenu before opening the menu and refresh the accounts list so
+// a newly added account shows up immediately.
 watch(isOpen, () => {
 	if (isOpen.value) {
 		userStatusSubMenuOpen.value = false
+		refreshAccounts()
 	}
 })
 
@@ -168,6 +203,21 @@ function handleUserStatusChange(status: UserStatusStatusType) {
 								<template v-if="userStatus.message" #action-icon>
 									<IconPencilOutline :size="20" />
 								</template>
+							</UiMenuItem>
+
+							<UiMenuSeparator />
+						</template>
+
+						<template v-if="otherAccounts.length">
+							<UiMenuItem
+								v-for="account in otherAccounts"
+								:key="account.id"
+								tag="button"
+								@click="switchAccount(account.id)">
+								<template #icon>
+									<IconAccountOutline :size="20" />
+								</template>
+								{{ account.id }}
 							</UiMenuItem>
 
 							<UiMenuSeparator />

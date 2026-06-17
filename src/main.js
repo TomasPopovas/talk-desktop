@@ -468,12 +468,32 @@ app.whenReady().then(async () => {
 	ipcMain.handle('appData:get', (event) => {
 		const account = getAccountByWebContentsId(event.sender.id)
 		if (account) {
-			// For isolated (secondary) accounts restored from disk, force a metadata
-			// refresh on load since they did not go through the welcome refetch.
-			const forceRefetch = account.partition !== null
-			return { ...account.appData, talkHashDirty: forceRefetch ? true : account.appData.talkHashDirty }
+			// Return the account's stored appData as-is.
+			//
+			// Previously secondary (isolated) accounts forced `talkHashDirty = true`
+			// to refresh metadata on every load. That made each secondary window run
+			// a blocking refetch on startup and, on ANY transient failure (e.g. a
+			// certificate prompt from a TLS-inspecting proxy/AV), relaunch the WHOLE
+			// application from setupWebPage() - which looked exactly like "the second
+			// account window disappears after login".
+			//
+			// The stored appData already contains capabilities/userMetadata captured
+			// during login and persisted across restarts, so no forced refetch is
+			// needed. A normal talk-hash change still triggers a refresh, but that is
+			// now non-fatal (see setupWebPage()).
+			return account.appData
 		}
 		return appData.toJSON()
+	})
+
+	// Return the account that owns the calling window (used by the renderer to
+	// build the in-app account switcher and to mark the active account).
+	ipcMain.handle('accounts:current', (event) => {
+		const account = getAccountByWebContentsId(event.sender.id)
+		if (!account) {
+			return null
+		}
+		return { id: account.id, isPrimary: account.partition === null }
 	})
 
 	// Accounts IPC
@@ -540,7 +560,19 @@ app.whenReady().then(async () => {
 		const authWindow = BrowserWindow.fromWebContents(event.sender)
 
 		const talkWindow = openAccountTalkWindow(account)
-		onReadyToShow(talkWindow, () => talkWindow.show())
+		// Show and focus the freshly created window robustly. `ready-to-show` may
+		// race with the auth window closing, so also show on `did-finish-load`.
+		const showAndFocus = () => {
+			if (!talkWindow.isDestroyed()) {
+				if (talkWindow.isMinimized()) {
+					talkWindow.restore()
+				}
+				talkWindow.show()
+				talkWindow.focus()
+			}
+		}
+		onReadyToShow(talkWindow, showAndFocus)
+		talkWindow.webContents.once('did-finish-load', showAndFocus)
 
 		// The newly created talk window becomes the reference main window
 		mainWindow = talkWindow

@@ -274,12 +274,15 @@ export async function setupWebPage() {
 	if (appData.talkHashDirty) {
 		try {
 			await refetchAppData(appData)
-		} catch {
-			// This should never happen
-			// If it does, let's try to relaunch the app
-			window.TALK_DESKTOP.relaunch()
+		} catch (error) {
+			// Do NOT relaunch the whole application here. In multi-account mode every
+			// account runs in its own window and session; relaunching would kill all
+			// of them at once. A failed metadata refresh is non-fatal: continue with
+			// the capabilities/userMetadata we already have (from login or restored
+			// from disk) and let it refresh on the next successful request.
+			console.error('Failed to refresh appData on startup, continuing with cached data', error)
 		}
-		// Re-apply initial state after re-fetch
+		// Re-apply initial state after re-fetch (or with the cached data)
 		applyInitialState()
 	}
 

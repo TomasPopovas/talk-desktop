@@ -179,9 +179,15 @@ const TALK_DESKTOP = {
 	/**
 	 * Get the list of currently logged-in accounts.
 	 *
-	 * @return {Promise<Array<{ id: string }>>}
+	 * @return {Promise<Array<{ id: string, partition: string|null }>>}
 	 */
 	listAccounts: () => ipcRenderer.invoke('accounts:list'),
+	/**
+	 * Get the account that owns the current window.
+	 *
+	 * @return {Promise<{ id: string, isPrimary: boolean }|null>}
+	 */
+	getCurrentAccount: () => ipcRenderer.invoke('accounts:current'),
 	/**
 	 * Focus (and restore/recreate) the window of an account.
 	 *

@@ -41,6 +41,11 @@ function createTalkWindow(account) {
 		webPreferences: {
 			preload: TALK_DESKTOP__WINDOW_TALK_PRELOAD_WEBPACK_ENTRY,
 			zoomFactor,
+			// Keep timers (notification polling, notify_push) running at full rate
+			// even when the window is hidden/minimized to tray. Otherwise Chromium
+			// throttles background windows and notifications from a non-active
+			// account would arrive late or stall.
+			backgroundThrottling: false,
 			// Isolate the account into its own persistent session.
 			// `undefined` keeps the default session for the primary account.
 			...(account?.partition ? { partition: account.partition } : {}),
