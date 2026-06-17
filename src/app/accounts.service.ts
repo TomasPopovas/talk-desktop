@@ -5,11 +5,12 @@
 
 import type { Session } from 'electron'
 
-import { app, safeStorage, session } from 'electron'
-import { registerAppProtocolHandlerForSession } from './appProtocol.ts'
+import { app, BrowserWindow, safeStorage, session } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { registerAppProtocolHandlerForSession } from './appProtocol.ts'
+import { promptCertificateTrust } from './certificate.service.ts'
 
 /**
  * A single logged-in account.
@@ -219,12 +220,25 @@ function configureAccountSession(ses: Session): void {
 		ses.setDevicePermissionHandler(() => true)
 	}
 
-	// The default session already has the app protocol handler (registered at
-	// startup). Isolated partition sessions do not inherit it, so register it
-	// here — otherwise the app's own UI windows would be requested from the
-	// real server instead of being served from local files.
+	// The default session already has the app protocol handler and certificate
+	// verification (registered at startup). Isolated partition sessions do not
+	// inherit them, so register here.
 	if (ses !== session.defaultSession) {
 		registerAppProtocolHandlerForSession(ses)
+
+		// Certificate trust: behind a TLS-inspecting proxy/antivirus (e.g.
+		// Kaspersky) every request has an "untrusted" certificate. Without a
+		// verify proc on the partition session, all the account's requests fail.
+		ses.setCertificateVerifyProc(async (request, callback) => {
+			if (request.errorCode === 0) {
+				callback(0)
+				return
+			}
+			const parent = BrowserWindow.getFocusedWindow()
+				?? BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())
+			const accepted = await promptCertificateTrust(parent, request)
+			callback(accepted ? 0 : -3)
+		})
 	}
 }
 

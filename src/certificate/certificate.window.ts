@@ -18,7 +18,12 @@ import { getBrowserWindowIcon } from '../shared/icons.utils.js'
  * @param details - Error details
  * @return Whether user accept the certificate
  */
-export function showCertificateTrustDialog(parentWindow: BrowserWindow, details: UntrustedCertificateDetails) {
+export function showCertificateTrustDialog(parentWindow: BrowserWindow | undefined, details: UntrustedCertificateDetails) {
+	// Only attach to a live parent. The parent window may already be destroyed
+	// by the time an async certificate prompt fires (e.g. while the login window
+	// is closing), and `new BrowserWindow({ parent: <destroyed> })` would throw
+	// "Object has been destroyed" and crash the main process.
+	const liveParent = parentWindow && !parentWindow.isDestroyed() ? parentWindow : undefined
 	const window = new BrowserWindow({
 		title: buildTitle(),
 		...getScaledWindowSize({
@@ -29,8 +34,7 @@ export function showCertificateTrustDialog(parentWindow: BrowserWindow, details:
 			minWidth: 320,
 			minHeight: 256,
 		}),
-		parent: parentWindow,
-		modal: true,
+		...(liveParent ? { parent: liveParent, modal: true } : {}),
 		show: false,
 		maximizable: false,
 		minimizable: false,

@@ -26,7 +26,7 @@ const pendingCertificateTrustPrompts: Map<string, Promise<boolean>> = new Map()
  * @param details - Error details
  * @return Whether the certificate is accepted as trusted
  */
-export async function promptCertificateTrust(window: BrowserWindow, details: UntrustedCertificateDetails): Promise<boolean> {
+export async function promptCertificateTrust(window: BrowserWindow | undefined, details: UntrustedCertificateDetails): Promise<boolean> {
 	const fingerprint = details.certificate.fingerprint
 	const trustedFingerprints = getAppConfig('trustedFingerprints')
 
@@ -69,7 +69,7 @@ export async function promptCertificateTrust(window: BrowserWindow, details: Unt
  * @param window - Parent browser window
  * @param url - URL
  */
-export async function verifyCertificate(window: BrowserWindow, url: string): Promise<boolean> {
+export async function verifyCertificate(window: BrowserWindow | undefined, url: string): Promise<boolean> {
 	const certificateVerifySession = session.fromPartition(`certificate:verify:${Math.random().toString(36).slice(2, 9)}`)
 
 	let verificationResolvers: PromiseWithResolvers<boolean> | undefined
