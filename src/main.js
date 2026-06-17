@@ -17,6 +17,7 @@ const {
 	upsertAccount,
 	removeAccount,
 	generateAccountPartition,
+	prepareAccountSession,
 } = require('./app/accounts.service.ts')
 const { setupMenu } = require('./app/app.menu.js')
 const { loadAppConfig, getAppConfig, setAppConfig } = require('./app/AppConfig.ts')
@@ -293,6 +294,10 @@ app.whenReady().then(async () => {
 	 */
 	function addAccount() {
 		const partition = generateAccountPartition()
+		// Register the app protocol + permission handlers on the new isolated
+		// session BEFORE the window loads, otherwise its UI would be requested
+		// from the real server instead of local files.
+		prepareAccountSession(partition)
 		const authWindow = createAuthenticationWindow({ partition })
 		pendingAuthPartitions.set(authWindow.webContents.id, partition)
 		authWindow.on('closed', () => pendingAuthPartitions.delete(authWindow.webContents.id))

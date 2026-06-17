@@ -6,6 +6,7 @@
 import type { Session } from 'electron'
 
 import { app, safeStorage, session } from 'electron'
+import { registerAppProtocolHandlerForSession } from './appProtocol.ts'
 import { randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -217,6 +218,27 @@ function configureAccountSession(ses: Session): void {
 	if (typeof ses.setDevicePermissionHandler === 'function') {
 		ses.setDevicePermissionHandler(() => true)
 	}
+
+	// The default session already has the app protocol handler (registered at
+	// startup). Isolated partition sessions do not inherit it, so register it
+	// here — otherwise the app's own UI windows would be requested from the
+	// real server instead of being served from local files.
+	if (ses !== session.defaultSession) {
+		registerAppProtocolHandlerForSession(ses)
+	}
+}
+
+/**
+ * Prepare an Electron session (by partition) for use by an account: register
+ * the app protocol handler and media permission handlers. Safe to call multiple
+ * times. Must be called BEFORE a window using this session loads its URL.
+ *
+ * @param partition - Session partition, or null for the default session
+ */
+export function prepareAccountSession(partition: string | null): Session {
+	const ses = partition ? session.fromPartition(partition) : session.defaultSession
+	configureAccountSession(ses)
+	return ses
 }
 
 /**
@@ -225,9 +247,7 @@ function configureAccountSession(ses: Session): void {
  * @param account - Account
  */
 export function getAccountSession(account: Account): Session {
-	const ses = account.partition ? session.fromPartition(account.partition) : session.defaultSession
-	configureAccountSession(ses)
-	return ses
+	return prepareAccountSession(account.partition)
 }
 
 /**

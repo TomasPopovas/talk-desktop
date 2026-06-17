@@ -4,6 +4,7 @@
  */
 
 import { app, net, protocol } from 'electron'
+import type { Session } from 'electron'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import packageJson from '../../package.json'
@@ -36,42 +37,64 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 /**
- * Register app protocol handler
+ * Handle an https request: serve the app's own UI from local files for
+ * internal URLs, proxy everything else to the real destination.
+ *
+ * @param request - Intercepted request
  */
-export function registerAppProtocolHandler() {
-	protocol.handle('https', async (request) => {
-		const url = new URL(request.url)
+async function handleAppProtocolRequest(request: Request): Promise<Response> {
+	const url = new URL(request.url)
 
-		// Override default Electron's User-Agent
-		// Note: it is supposed to work via webRequest.onBeforeSendHeaders (according to the Electron documentation)
-		// But for User-Agent header in net.fetch request it does not...
-		request.headers.set('User-Agent', USER_AGENT)
+	// Override default Electron's User-Agent
+	// Note: it is supposed to work via webRequest.onBeforeSendHeaders (according to the Electron documentation)
+	// But for User-Agent header in net.fetch request it does not...
+	request.headers.set('User-Agent', USER_AGENT)
 
-		// Handle internal application resource
-		if (isInternalUrl(url)) {
-			// In development mode proxy requests to the dev server
-			if (process.env.NODE_ENV === 'development') {
-				return net.fetch(DEV_SERVER_ORIGIN + url.pathname + url.search + url.hash, { bypassCustomProtocolHandlers: true })
-			}
-
-			const distPath = getDistPath()
-			const requestPath = path.join(distPath, decodeURIComponent(url.pathname))
-
-			// Prevent accessing external files via https://app/../../path/to/external/file
-			// Note: it is not supposed to happen with asar package but still better to check
-			const relativePath = path.relative(distPath, requestPath)
-			if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
-				console.warn(`Unsafe path requested: ${requestPath}`)
-				return new Response(`Cannot GET ${request.url}`, { status: 404 })
-			}
-
-			// Open file://path/to/app/file?query#hash
-			return net.fetch(pathToFileURL(requestPath).toString() + url.search + url.hash)
+	// Handle internal application resource
+	if (isInternalUrl(url)) {
+		// In development mode proxy requests to the dev server
+		if (process.env.NODE_ENV === 'development') {
+			return net.fetch(DEV_SERVER_ORIGIN + url.pathname + url.search + url.hash, { bypassCustomProtocolHandlers: true })
 		}
 
-		// Proxy the request to the original destination
-		return net.fetch(request, { bypassCustomProtocolHandlers: true })
-	})
+		const distPath = getDistPath()
+		const requestPath = path.join(distPath, decodeURIComponent(url.pathname))
+
+		// Prevent accessing external files via https://app/../../path/to/external/file
+		// Note: it is not supposed to happen with asar package but still better to check
+		const relativePath = path.relative(distPath, requestPath)
+		if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+			console.warn(`Unsafe path requested: ${requestPath}`)
+			return new Response(`Cannot GET ${request.url}`, { status: 404 })
+		}
+
+		// Open file://path/to/app/file?query#hash
+		return net.fetch(pathToFileURL(requestPath).toString() + url.search + url.hash)
+	}
+
+	// Proxy the request to the original destination
+	return net.fetch(request, { bypassCustomProtocolHandlers: true })
+}
+
+/**
+ * Register app protocol handler on the default session
+ */
+export function registerAppProtocolHandler() {
+	protocol.handle('https', handleAppProtocolRequest)
+}
+
+/**
+ * Register the same app protocol handler on a specific (isolated) session.
+ *
+ * Secondary accounts run in their own partition session, which does NOT inherit
+ * the default session's protocol handler. Without this the app's own UI windows
+ * (loaded from https://<server>/talk_desktop__window_.../) would be requested
+ * from the real server instead of being served from local files.
+ *
+ * @param ses - Session to register the handler on
+ */
+export function registerAppProtocolHandlerForSession(ses: Session) {
+	ses.protocol.handle('https', handleAppProtocolRequest)
 }
 
 let distPath: string
