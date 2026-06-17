@@ -1,0 +1,211 @@
+diff --git a/src/main.js b/src/main.js
+index f06ee8e..910c11f 100644
+--- a/src/main.js
++++ b/src/main.js
+@@ -468,14 +468,34 @@ app.whenReady().then(async () => {
+ 	ipcMain.handle('appData:get', (event) => {
+ 		const account = getAccountByWebContentsId(event.sender.id)
+ 		if (account) {
+-			// For isolated (secondary) accounts restored from disk, force a metadata
+-			// refresh on load since they did not go through the welcome refetch.
+-			const forceRefetch = account.partition !== null
+-			return { ...account.appData, talkHashDirty: forceRefetch ? true : account.appData.talkHashDirty }
++			// Return the account's stored appData as-is.
++			//
++			// Previously secondary (isolated) accounts forced `talkHashDirty = true`
++			// to refresh metadata on every load. That made each secondary window run
++			// a blocking refetch on startup and, on ANY transient failure (e.g. a
++			// certificate prompt from a TLS-inspecting proxy/AV), relaunch the WHOLE
++			// application from setupWebPage() - which looked exactly like "the second
++			// account window disappears after login".
++			//
++			// The stored appData already contains capabilities/userMetadata captured
++			// during login and persisted across restarts, so no forced refetch is
++			// needed. A normal talk-hash change still triggers a refresh, but that is
++			// now non-fatal (see setupWebPage()).
++			return account.appData
+ 		}
+ 		return appData.toJSON()
+ 	})
+ 
++	// Return the account that owns the calling window (used by the renderer to
++	// build the in-app account switcher and to mark the active account).
++	ipcMain.handle('accounts:current', (event) => {
++		const account = getAccountByWebContentsId(event.sender.id)
++		if (!account) {
++			return null
++		}
++		return { id: account.id, isPrimary: account.partition === null }
++	})
++
+ 	// Accounts IPC
+ 	ipcMain.handle('accounts:add', () => addAccount())
+ 	ipcMain.handle('accounts:list', () => listAccounts().map((account) => ({ id: account.id, partition: account.partition })))
+@@ -540,7 +560,19 @@ app.whenReady().then(async () => {
+ 		const authWindow = BrowserWindow.fromWebContents(event.sender)
+ 
+ 		const talkWindow = openAccountTalkWindow(account)
+-		onReadyToShow(talkWindow, () => talkWindow.show())
++		// Show and focus the freshly created window robustly. `ready-to-show` may
++		// race with the auth window closing, so also show on `did-finish-load`.
++		const showAndFocus = () => {
++			if (!talkWindow.isDestroyed()) {
++				if (talkWindow.isMinimized()) {
++					talkWindow.restore()
++				}
++				talkWindow.show()
++				talkWindow.focus()
++			}
++		}
++		onReadyToShow(talkWindow, showAndFocus)
++		talkWindow.webContents.once('did-finish-load', showAndFocus)
+ 
+ 		// The newly created talk window becomes the reference main window
+ 		mainWindow = talkWindow
+diff --git a/src/preload.js b/src/preload.js
+index d350643..51a69fd 100644
+--- a/src/preload.js
++++ b/src/preload.js
+@@ -179,9 +179,15 @@ const TALK_DESKTOP = {
+ 	/**
+ 	 * Get the list of currently logged-in accounts.
+ 	 *
+-	 * @return {Promise<Array<{ id: string }>>}
++	 * @return {Promise<Array<{ id: string, partition: string|null }>>}
+ 	 */
+ 	listAccounts: () => ipcRenderer.invoke('accounts:list'),
++	/**
++	 * Get the account that owns the current window.
++	 *
++	 * @return {Promise<{ id: string, isPrimary: boolean }|null>}
++	 */
++	getCurrentAccount: () => ipcRenderer.invoke('accounts:current'),
+ 	/**
+ 	 * Focus (and restore/recreate) the window of an account.
+ 	 *
+diff --git a/src/shared/setupWebPage.js b/src/shared/setupWebPage.js
+index 6c53396..9481018 100644
+--- a/src/shared/setupWebPage.js
++++ b/src/shared/setupWebPage.js
+@@ -274,12 +274,15 @@ export async function setupWebPage() {
+ 	if (appData.talkHashDirty) {
+ 		try {
+ 			await refetchAppData(appData)
+-		} catch {
+-			// This should never happen
+-			// If it does, let's try to relaunch the app
+-			window.TALK_DESKTOP.relaunch()
++		} catch (error) {
++			// Do NOT relaunch the whole application here. In multi-account mode every
++			// account runs in its own window and session; relaunching would kill all
++			// of them at once. A failed metadata refresh is non-fatal: continue with
++			// the capabilities/userMetadata we already have (from login or restored
++			// from disk) and let it refresh on the next successful request.
++			console.error('Failed to refresh appData on startup, continuing with cached data', error)
+ 		}
+-		// Re-apply initial state after re-fetch
++		// Re-apply initial state after re-fetch (or with the cached data)
+ 		applyInitialState()
+ 	}
+ 
+diff --git a/src/talk/renderer/TitleBar/components/UserMenu.vue b/src/talk/renderer/TitleBar/components/UserMenu.vue
+index d6e59ec..372acb0 100644
+--- a/src/talk/renderer/TitleBar/components/UserMenu.vue
++++ b/src/talk/renderer/TitleBar/components/UserMenu.vue
+@@ -9,10 +9,11 @@ import type { UserStatusStatusType } from '../../UserStatus/userStatus.types.ts'
+ import { t } from '@nextcloud/l10n'
+ import { generateUrl } from '@nextcloud/router'
+ import { storeToRefs } from 'pinia'
+-import { ref, useTemplateRef, watch } from 'vue'
++import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
+ import NcAvatar from '@nextcloud/vue/components/NcAvatar'
+ import NcPopover from '@nextcloud/vue/components/NcPopover'
+ import NcUserStatusIcon from '@nextcloud/vue/components/NcUserStatusIcon'
++import IconAccountOutline from 'vue-material-design-icons/AccountOutline.vue'
+ import IconAccountPlusOutline from 'vue-material-design-icons/AccountPlusOutline.vue'
+ import IconCheck from 'vue-material-design-icons/Check.vue'
+ import IconChevronLeft from 'vue-material-design-icons/ChevronLeft.vue'
+@@ -44,10 +45,44 @@ const userMenuContainer = useTemplateRef('userMenuContainer')
+ const isUserStatusDialogOpen = ref(false)
+ const userStatusSubMenuOpen = ref(false)
+ 
+-// Close the submenu before opening the menu
++// --- Multi-account switcher ------------------------------------------------
++// Stable id of THIS window's account, in the same `user@host` format the main
++// process uses (see accountIdFromAppData), so we can exclude it from the list.
++const currentAccountId = `${(appData.credentials! as { user: string }).user}@${serverUrlShort}`
++type AccountListEntry = { id: string, partition: string | null }
++const accounts = ref<AccountListEntry[]>([])
++// All known accounts except the one this window already shows.
++const otherAccounts = computed(() => accounts.value.filter((account) => account.id !== currentAccountId))
++
++/**
++ * Load the list of logged-in accounts from the main process.
++ */
++async function refreshAccounts() {
++	try {
++		accounts.value = await window.TALK_DESKTOP.listAccounts()
++	} catch (error) {
++		console.error('Failed to load accounts for the user menu', error)
++	}
++}
++
++/**
++ * Switch to another account's window (creating/restoring it if needed).
++ *
++ * @param id - Account id
++ */
++function switchAccount(id: string) {
++	isOpen.value = false
++	window.TALK_DESKTOP.focusAccount(id)
++}
++
++onMounted(refreshAccounts)
++
++// Close the submenu before opening the menu and refresh the accounts list so
++// a newly added account shows up immediately.
+ watch(isOpen, () => {
+ 	if (isOpen.value) {
+ 		userStatusSubMenuOpen.value = false
++		refreshAccounts()
+ 	}
+ })
+ 
+@@ -173,6 +208,21 @@ function handleUserStatusChange(status: UserStatusStatusType) {
+ 							<UiMenuSeparator />
+ 						</template>
+ 
++						<template v-if="otherAccounts.length">
++							<UiMenuItem
++								v-for="account in otherAccounts"
++								:key="account.id"
++								tag="button"
++								@click="switchAccount(account.id)">
++								<template #icon>
++									<IconAccountOutline :size="20" />
++								</template>
++								{{ account.id }}
++							</UiMenuItem>
++
++							<UiMenuSeparator />
++						</template>
++
+ 						<UiMenuItem tag="button" @click="addAccount">
+ 							<template #icon>
+ 								<IconAccountPlusOutline :size="20" />
+diff --git a/src/talk/talk.window.js b/src/talk/talk.window.js
+index 6b80ace..bae18dc 100644
+--- a/src/talk/talk.window.js
++++ b/src/talk/talk.window.js
+@@ -41,6 +41,11 @@ function createTalkWindow(account) {
+ 		webPreferences: {
+ 			preload: TALK_DESKTOP__WINDOW_TALK_PRELOAD_WEBPACK_ENTRY,
+ 			zoomFactor,
++			// Keep timers (notification polling, notify_push) running at full rate
++			// even when the window is hidden/minimized to tray. Otherwise Chromium
++			// throttles background windows and notifications from a non-active
++			// account would arrive late or stall.
++			backgroundThrottling: false,
+ 			// Isolate the account into its own persistent session.
+ 			// `undefined` keeps the default session for the primary account.
+ 			...(account?.partition ? { partition: account.partition } : {}),
