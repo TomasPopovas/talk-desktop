@@ -22,10 +22,10 @@ jobs:
 
     steps:
       - name: Checkout talk-desktop
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Checkout nextcloud/spreed
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: nextcloud/spreed
           ref: ${{ inputs.spreed_ref || 'stable34' }}
