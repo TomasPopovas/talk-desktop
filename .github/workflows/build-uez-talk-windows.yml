@@ -75,21 +75,21 @@ jobs:
           Compress-Archive -Path $dir.FullName -DestinationPath "out\UEZ.Talk-portable-windows-x64.zip"
 
       - name: Upload installer exe (per-user)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: UEZ-Talk-installer-exe
           path: out/make/**/*.exe
           if-no-files-found: error
 
       - name: Upload installer msi (GPO/SCCM)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: UEZ-Talk-installer-msi
           path: out/make/**/*.msi
           if-no-files-found: warn
 
       - name: Upload portable zip
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: UEZ-Talk-portable
           path: out/UEZ.Talk-portable-windows-x64.zip
