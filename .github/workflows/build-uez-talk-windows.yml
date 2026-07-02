@@ -19,6 +19,8 @@ jobs:
   build-windows-x64:
     runs-on: windows-latest
     timeout-minutes: 90
+    env:
+      TALK_PATH: ${{ github.workspace }}\spreed
 
     steps:
       - name: Checkout talk-desktop
