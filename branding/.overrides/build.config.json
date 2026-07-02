@@ -1,0 +1,16 @@
+{
+"applicationName": "UEZ Talk",
+"description": "Корпоративный мессенджер АО «СЗ «УЭЗ»",
+"domain": "https://o.uez.ru",
+"enforceDomain": true,
+"brandColor": "#016BB2",
+"brandGradient": "linear-gradient(40deg, #016BB2 0%, #2E9BE0 100%)",
+"brandFontColor": "#FFFFFF",
+"helpUrl": "https://sd.uez.ru",
+"privacyUrl": "https://uez.ru",
+"windowsExe": true,
+"windowsMsi": true,
+"macosDmg": false,
+"linuxFlatpak": false,
+"linuxZip": false
+}
