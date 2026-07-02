@@ -4,3 +4,4 @@
 * text=auto eol=lf
 /resources/server-global-styles/** binary
 /resources/server-global-styles/**/REUSE.toml text
+branding/brand-talk-desktop.sh text eol=lf
