@@ -1,22 +1,10 @@
-﻿# =============================================================================
-# РЎР±РѕСЂРєР° UEZ Talk (Р±СЂРµРЅРґРёСЂРѕРІР°РЅРЅС‹Р№ Nextcloud Talk Desktop) РїРѕРґ Windows 11 x64.
-#
-# РљСѓРґР° РїРѕР»РѕР¶РёС‚СЊ: .github/workflows/build-uez-talk-windows.yml РІ С„РѕСЂРєРµ talk-desktop
-# РўСЂРµР±СѓРµС‚: РєР°С‚Р°Р»РѕРі branding/ РІ РєРѕСЂРЅРµ С„РѕСЂРєР° (СЃРѕРґРµСЂР¶РёРјРѕРµ uez-talk-branding.zip)
-#
-# РђСЂС‚РµС„Р°РєС‚С‹:
-#   UEZ-Talk-installer-exe вЂ” Squirrel-СѓСЃС‚Р°РЅРѕРІС‰РёРє, СЃС‚Р°РІРёС‚СЃСЏ Р’ РџР РћР¤РР›Р¬ РџРћР›Р¬Р—РћР’РђРўР•Р›РЇ
-#                            (%LocalAppData%\UEZTalk), РїСЂР°РІР° Р°РґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР° РЅРµ РЅСѓР¶РЅС‹
-#   UEZ-Talk-installer-msi вЂ” WiX MSI, РјР°С€РёРЅРЅР°СЏ СѓСЃС‚Р°РЅРѕРІРєР° (GPO/SCCM)
-#   UEZ-Talk-portable      вЂ” РїР°РїРєР° СЃ РіРѕС‚РѕРІРѕР№ РїСЂРѕРіСЂР°РјРјРѕР№ (Р·Р°РїСѓСЃРє Р±РµР· СѓСЃС‚Р°РЅРѕРІРєРё)
-# =============================================================================
 name: Build UEZ Talk (Windows x64)
 
 on:
   workflow_dispatch:
     inputs:
       spreed_ref:
-        description: 'Р’РµС‚РєР°/С‚РµРі nextcloud/spreed (РІСЃС‚СЂРѕРµРЅРЅС‹Р№ Talk)'
+        description: 'Ветка/тег nextcloud/spreed (встроенный Talk)'
         default: 'stable34'
         required: true
   push:
@@ -33,7 +21,7 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - name: Checkout talk-desktop (С„РѕСЂРє СЃ branding/)
+      - name: Checkout talk-desktop
         uses: actions/checkout@v4
 
       - name: Checkout nextcloud/spreed
@@ -52,12 +40,15 @@ jobs:
             package-lock.json
             spreed/package-lock.json
 
-      - name: Install WiX Toolset 3.14 (РґР»СЏ MSI)
+      - name: Install WiX Toolset 3.14 (msi)
+        shell: pwsh
         run: |
-          if (-not (Test-Path "C:\Program Files (x86)\WiX Toolset v3.14\bin\candle.exe")) { choco install wixtoolset -y --no-progress }
+          if (-not (Test-Path 'C:\Program Files (x86)\WiX Toolset v3.14\bin\candle.exe')) {
+            choco install wixtoolset -y --no-progress
+          }
           echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
-      - name: РџСЂРёРјРµРЅРёС‚СЊ Р±СЂРµРЅРґРёСЂРѕРІР°РЅРёРµ РЈР­Р—
+      - name: Apply UEZ branding
         shell: bash
         run: bash branding/brand-talk-desktop.sh .
 
@@ -67,37 +58,37 @@ jobs:
       - name: npm ci (spreed)
         run: npm ci --prefix=spreed
 
-      - name: РЎР±РѕСЂРєР° РїСЂРёР»РѕР¶РµРЅРёСЏ (portable-РїР°РїРєР°)
+      - name: Build app (portable)
         run: npm run build:windows:x64
         env:
           NODE_OPTIONS: --max-old-space-size=8192
 
-      - name: РЎР±РѕСЂРєР° СѓСЃС‚Р°РЅРѕРІС‰РёРєРѕРІ (Squirrel .exe + WiX .msi)
+      - name: Make installers (Squirrel exe + WiX msi)
         run: npm run package:windows:x64
         env:
           NODE_OPTIONS: --max-old-space-size=8192
 
-      - name: РЈРїР°РєРѕРІР°С‚СЊ portable-РїР°РїРєСѓ
+      - name: Zip portable folder
         shell: pwsh
         run: |
           $dir = Get-ChildItem out -Directory | Where-Object { $_.Name -like '*win32-x64*' } | Select-Object -First 1
           Compress-Archive -Path $dir.FullName -DestinationPath "out\UEZ.Talk-portable-windows-x64.zip"
 
-      - name: РђСЂС‚РµС„Р°РєС‚ вЂ” СѓСЃС‚Р°РЅРѕРІС‰РёРє РІ РїСЂРѕС„РёР»СЊ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ (.exe)
+      - name: Upload installer exe (per-user)
         uses: actions/upload-artifact@v4
         with:
           name: UEZ-Talk-installer-exe
           path: out/make/**/*.exe
           if-no-files-found: error
 
-      - name: РђСЂС‚РµС„Р°РєС‚ вЂ” MSI РґР»СЏ СЂР°Р·РІС‘СЂС‚С‹РІР°РЅРёСЏ (GPO/SCCM)
+      - name: Upload installer msi (GPO/SCCM)
         uses: actions/upload-artifact@v4
         with:
           name: UEZ-Talk-installer-msi
           path: out/make/**/*.msi
           if-no-files-found: warn
 
-      - name: РђСЂС‚РµС„Р°РєС‚ вЂ” portable-РїР°РїРєР°
+      - name: Upload portable zip
         uses: actions/upload-artifact@v4
         with:
           name: UEZ-Talk-portable
