@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 90
     env:
       TALK_PATH: ${{ github.workspace }}\spreed
+      CHANNEL: stable
 
     steps:
       - name: Checkout talk-desktop
