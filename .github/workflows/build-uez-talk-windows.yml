@@ -61,13 +61,8 @@ jobs:
       - name: npm ci (spreed)
         run: npm ci --prefix=spreed
 
-      - name: Build app (portable)
-        run: npm run build:windows:x64
-        env:
-          NODE_OPTIONS: --max-old-space-size=8192
-
-      - name: Make installers (Squirrel exe + WiX msi)
-        run: npm run package:windows:x64
+      - name: Build app and make installers
+        run: npx electron-forge make --platform=win32 --arch=x64
         env:
           NODE_OPTIONS: --max-old-space-size=8192
 
