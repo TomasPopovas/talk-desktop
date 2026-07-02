@@ -37,7 +37,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.15.0
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -62,10 +62,13 @@ jobs:
         run: npm ci --prefix=spreed
 
       - name: Build app and make installers
-        run: npx electron-forge make --platform=win32 --arch=x64
+        shell: pwsh
+        run: |
+          npx electron-forge make --platform=win32 --arch=x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path 'out')) { Write-Error 'Packaging silently failed: out/ was not created'; exit 1 }
         env:
           NODE_OPTIONS: --max-old-space-size=8192
-
       - name: Zip portable folder
         shell: pwsh
         run: |
