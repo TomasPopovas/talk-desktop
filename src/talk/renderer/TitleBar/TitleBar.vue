@@ -22,6 +22,7 @@ const channel = __CHANNEL__
 const OS = window.systemInfo
 
 const applicationName = BUILD_CONFIG.applicationName
+	import LogoMark from '../../../../img/talk-icon-plain-light.svg'
 
 const { isDevMode } = useDevMode()
 </script>
@@ -31,7 +32,8 @@ const { isDevMode } = useDevMode()
 		<div class="title-bar__inner">
 			<template v-if="!OS.isMac">
 				<div class="title-bar__title">
-					{{ applicationName }}
+					<img :src="LogoMark" class="title-bar__logo" alt="">
+					<span>Корпоративный мессенджер</span>
 				</div>
 
 				<div v-if="channel !== 'stable'" class="title-bar__channel">
@@ -89,11 +91,19 @@ const { isDevMode } = useDevMode()
 .title-bar__title {
 	margin-inline-end: calc(var(--default-grid-baseline) * 2);
 	position: relative;
-	font-size: 18px;
+	font-size: 16px;
 	font-weight: bold;
+	display: flex;
+	align-items: center;
+	gap: 8px;
 	&:focus-visible::after {
 		bottom: 0;
 	}
+}
+
+.title-bar__logo {
+	height: 28px;
+	width: auto;
 }
 
 .title-bar__channel {
