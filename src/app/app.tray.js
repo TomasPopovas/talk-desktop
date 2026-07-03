@@ -6,7 +6,7 @@
 const { app, Tray, Menu } = require('electron')
 const path = require('node:path')
 const { getTrayIcon } = require('../shared/icons.utils.js')
-const { requestAddAccount, requestFocusAccount } = require('./accountActions.ts')
+const { requestAddAccount, requestFocusAccount, requestFocusActive } = require('./accountActions.ts')
 const { listAccounts } = require('./accounts.service.ts')
 
 let isAppQuitting = false
@@ -25,12 +25,12 @@ app.on('before-quit', () => {
  * @param {import('./accounts.service.ts').Account} [account] - Account associated with the tray
  * @return {import('electron').Menu}
  */
-function buildTrayMenu(browserWindow, account) {
+function buildTrayMenu(account) {
 	const accounts = listAccounts()
 	const template = [
 		{
 			label: 'Open',
-			click: () => browserWindow.show(),
+			click: () => requestFocusActive(),
 		},
 	]
 
@@ -67,19 +67,24 @@ function buildTrayMenu(browserWindow, account) {
  * @param {import('./accounts.service.ts').Account} [account] Account associated with the tray
  * @return {import('electron').Tray} Tray instance
  */
-function setupTray(browserWindow, account) {
-	const icon = path.resolve(__dirname, getTrayIcon())
-	const tray = new Tray(icon)
-	tray.setToolTip(account?.id ? `${app.name} — ${account.id}` : app.name)
-	tray.setContextMenu(buildTrayMenu(browserWindow, account))
+/** Single shared tray instance for the whole application */
+let trayInstance = null
 
-	const showWindow = () => {
-		if (!browserWindow.isDestroyed()) {
-			browserWindow.show()
-		}
+/**
+ * Update the shared tray menu and tooltip to reflect the active account.
+ *
+ * @param {import('./accounts.service.ts').Account} [activeAccount] - Currently active account
+ */
+function updateTrayMenu(activeAccount) {
+	if (!trayInstance || trayInstance.isDestroyed()) {
+		return
 	}
-	tray.on('click', showWindow)
+	trayInstance.setToolTip(activeAccount?.id ? `${app.name} — ${activeAccount.id}` : app.name)
+	trayInstance.setContextMenu(buildTrayMenu(activeAccount))
+}
 
+function setupTray(browserWindow, account) {
+	// Minimize to tray instead of closing (per window)
 	browserWindow.on('close', (event) => {
 		if (!isAppQuitting && !browserWindow.isDestroyed()) {
 			event.preventDefault()
@@ -87,15 +92,19 @@ function setupTray(browserWindow, account) {
 		}
 	})
 
-	browserWindow.on('closed', () => {
-		if (!tray.isDestroyed()) {
-			tray.destroy()
-		}
-	})
+	// The tray icon is shared between all account windows
+	if (!trayInstance || trayInstance.isDestroyed()) {
+		const icon = path.resolve(__dirname, getTrayIcon())
+		trayInstance = new Tray(icon)
+		trayInstance.on('click', () => requestFocusActive())
+	}
 
-	return tray
+	updateTrayMenu(account)
+
+	return trayInstance
 }
 
 module.exports = {
 	setupTray,
+	updateTrayMenu,
 }

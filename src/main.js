@@ -8,6 +8,7 @@ const { default: mri } = require('mri')
 const { spawn } = require('node:child_process')
 const path = require('node:path')
 const { setAccountActions } = require('./app/accountActions.ts')
+const { updateTrayMenu } = require('./app/app.tray.js')
 const {
 	loadAccounts,
 	listAccounts,
@@ -271,6 +272,37 @@ app.whenReady().then(async () => {
 	 *
 	 * @param {string} id - Account id
 	 */
+	/**
+	 * Show a talk window as the only visible one: take over the bounds of the
+	 * currently visible talk window (so switching looks like an in-place
+	 * profile change) and hide all the other talk windows. Hidden windows keep
+	 * running in the background, so their notifications continue to work.
+	 *
+	 * @param {import('electron').BrowserWindow} win - Window to show
+	 */
+	function showAccountWindowExclusively(win) {
+		let boundsTaken = false
+		for (const other of talkWindows.values()) {
+			if (other === win || other.isDestroyed() || !other.isVisible()) {
+				continue
+			}
+			if (!boundsTaken && !other.isMinimized() && !win.isDestroyed()) {
+				if (other.isMaximized()) {
+					win.maximize()
+				} else {
+					win.setBounds(other.getBounds())
+				}
+				boundsTaken = true
+			}
+			other.hide()
+		}
+		if (win.isMinimized()) {
+			win.restore()
+		}
+		win.show()
+		win.focus()
+	}
+
 	function focusAccount(id) {
 		const account = getAccountById(id)
 		if (!account) {
@@ -278,15 +310,15 @@ app.whenReady().then(async () => {
 		}
 		const win = talkWindows.get(id)
 		if (win && !win.isDestroyed()) {
-			if (win.isMinimized()) {
-				win.restore()
-			}
-			win.show()
-			win.focus()
+			showAccountWindowExclusively(win)
+			mainWindow = win
+			updateTrayMenu(account)
 			return
 		}
-		const created = openAccountTalkWindow(account)
-		onReadyToShow(created, () => created.show())
+		const created = openAccountTalkWindow(account, { background: true })
+		onReadyToShow(created, () => showAccountWindowExclusively(created))
+		mainWindow = created
+		updateTrayMenu(account)
 	}
 
 	/**
@@ -333,8 +365,14 @@ app.whenReady().then(async () => {
 
 		rebuildAppMenu()
 
+		// Switch to another account so the user is not left without any window
+		const remaining = listAccounts()
+		if (remaining.length > 0) {
+			focusAccount(remaining[0].id)
+		}
+
 		// If that was the last account, return to the authentication window
-		if (listAccounts().length === 0) {
+		if (remaining.length === 0) {
 			const authWindow = createAuthenticationWindow()
 			mainWindow = authWindow
 			createMainWindow = createAuthenticationWindow
@@ -347,6 +385,7 @@ app.whenReady().then(async () => {
 		addAccount,
 		focusAccount,
 		logoutAccount: logoutAccountById,
+		focusActive: () => focusMainWindow(),
 	})
 
 	/**
@@ -442,8 +481,15 @@ app.whenReady().then(async () => {
 
 		if (allAccounts.length > 0) {
 			// Open a talk window for every known account, each in its own session
+			let isFirstAccount = true
 			for (const account of allAccounts) {
-				openAccountTalkWindow(account, { background: openInBackground })
+				// Only one account window is visible at a time - the rest stay
+				// hidden in the background (notifications keep working)
+				openAccountTalkWindow(account, { background: openInBackground || !isFirstAccount })
+				if (isFirstAccount) {
+					updateTrayMenu(account)
+				}
+				isFirstAccount = false
 			}
 			rebuildAppMenu()
 
@@ -539,11 +585,12 @@ app.whenReady().then(async () => {
 
 		const authWindow = BrowserWindow.fromWebContents(event.sender)
 
-		const talkWindow = openAccountTalkWindow(account)
-		onReadyToShow(talkWindow, () => talkWindow.show())
+		const talkWindow = openAccountTalkWindow(account, { background: true })
+		onReadyToShow(talkWindow, () => showAccountWindowExclusively(talkWindow))
 
 		// The newly created talk window becomes the reference main window
 		mainWindow = talkWindow
+		updateTrayMenu(account)
 
 		rebuildAppMenu()
 

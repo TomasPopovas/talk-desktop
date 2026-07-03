@@ -45,9 +45,10 @@ const isUserStatusDialogOpen = ref(false)
 const userStatusSubMenuOpen = ref(false)
 
 // Close the submenu before opening the menu
-watch(isOpen, () => {
+watch(isOpen, async () => {
 	if (isOpen.value) {
 		userStatusSubMenuOpen.value = false
+		accounts.value = await window.TALK_DESKTOP.listAccounts()
 	}
 })
 
@@ -56,6 +57,22 @@ const userProfileLink = generateUrl('/u/{userid}', { userid: user.id })
 const logout = window.TALK_DESKTOP.logout
 const quit = window.TALK_DESKTOP.quit
 const addAccount = window.TALK_DESKTOP.addAccount
+
+// Account switcher: id of this window's account and the list of all accounts
+const currentAccountId = `${user.id}@${serverUrlShort}`
+const accounts = ref<{ id: string }[]>([])
+
+/**
+ * Switch to another account window
+ *
+ * @param id - Account id to switch to
+ */
+function switchAccount(id: string) {
+	isOpen.value = false
+	if (id !== currentAccountId) {
+		window.TALK_DESKTOP.focusAccount(id)
+	}
+}
 
 /**
  * Handle user status type change
@@ -173,6 +190,22 @@ function handleUserStatusChange(status: UserStatusStatusType) {
 							<UiMenuSeparator />
 						</template>
 
+						<template v-if="accounts.length > 1">
+							<UiMenuItem
+								v-for="account in accounts"
+								:key="account.id"
+								tag="button"
+								@click="switchAccount(account.id)">
+								<template #icon>
+									<IconCheck v-if="account.id === currentAccountId" :size="20" />
+									<span v-else class="user-menu__account-icon-placeholder" />
+								</template>
+								{{ account.id }}
+							</UiMenuItem>
+
+							<UiMenuSeparator />
+						</template>
+
 						<UiMenuItem tag="button" @click="addAccount">
 							<template #icon>
 								<IconAccountPlusOutline :size="20" />
@@ -213,6 +246,11 @@ function handleUserStatusChange(status: UserStatusStatusType) {
 .user-menu__trigger {
 	display: flex;
 	align-items: center;
+}
+
+.user-menu__account-icon-placeholder {
+	display: inline-block;
+	width: 20px;
 }
 
 .user-menu__avatar {

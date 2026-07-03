@@ -13,12 +13,14 @@ type Handlers = {
 	addAccount: () => void
 	focusAccount: (id: string) => void
 	logoutAccount: (id: string) => void
+	focusActive: () => void
 }
 
 const handlers: Handlers = {
 	addAccount: () => {},
 	focusAccount: () => {},
 	logoutAccount: () => {},
+	focusActive: () => {},
 }
 
 /**
@@ -53,4 +55,11 @@ export function requestFocusAccount(id: string): void {
  */
 export function requestLogoutAccount(id: string): void {
 	handlers.logoutAccount(id)
+}
+
+/**
+ * Request focusing the currently active account window.
+ */
+export function requestFocusActive(): void {
+	handlers.focusActive()
 }
