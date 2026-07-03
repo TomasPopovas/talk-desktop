@@ -89,16 +89,41 @@ export function buildTitle(title?: string) {
 const windows = ['authentication', 'callbox', 'certificate', 'help', 'talk', 'upgrade', 'welcome'] as const
 
 /**
+ * Origins of all known accounts. Internal window URLs may be served from any
+ * of them, not only from the primary (legacy global appData) account.
+ */
+const internalOrigins = new Set<string>()
+
+/**
+ * Register an account's server origin as internal.
+ *
+ * @param serverUrl - Account server URL
+ */
+export function addInternalOrigin(serverUrl: string) {
+	try {
+		internalOrigins.add(new URL(serverUrl).origin)
+	} catch {
+		// Ignore invalid URLs
+	}
+}
+
+/**
  * Get the URL for a window to load
  *
  * @param window - Window name
+ * @param serverUrl - Server URL of the account the window belongs to (defaults to the primary account)
  */
-export function getWindowUrl(window: typeof windows[number]) {
+export function getWindowUrl(window: typeof windows[number], serverUrl?: string) {
 	if (!windows.includes(window)) {
 		throw new Error(`Invalid window name: ${window}`)
 	}
 
-	const origin = appData.serverUrl ? new URL(appData.serverUrl).origin : APP_ORIGIN
+	// Windows of secondary accounts must be loaded from THEIR server origin:
+	// the Talk web app resolves all relative API requests against
+	// window.location.origin, and the per-session auth interceptor only
+	// matches the account's own server.
+	const baseUrl = serverUrl ?? appData.serverUrl
+	const origin = baseUrl ? new URL(baseUrl).origin : APP_ORIGIN
 	return `${origin}/talk_desktop__window_${window}/index.html`
 }
 
@@ -112,9 +137,9 @@ export function isInternalUrl(url: string | URL) {
 		url = new URL(url)
 	}
 
-	const internalOrigin = appData.serverUrl ? new URL(appData.serverUrl).origin : APP_ORIGIN
+	const primaryOrigin = appData.serverUrl ? new URL(appData.serverUrl).origin : APP_ORIGIN
 
-	return url.origin === internalOrigin && url.pathname.startsWith('/talk_desktop__')
+	return (url.origin === primaryOrigin || internalOrigins.has(url.origin)) && url.pathname.startsWith('/talk_desktop__')
 }
 
 /**

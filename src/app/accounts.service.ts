@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { registerAppProtocolHandlerForSession } from './appProtocol.ts'
+import { addInternalOrigin } from './utils.ts'
 import { promptCertificateTrust } from './certificate.service.ts'
 
 /**
@@ -160,11 +161,14 @@ export function loadAccounts(): Account[] {
 				console.warn(`Skipping account "${stored.id}" - credentials could not be restored`)
 				continue
 			}
-			accounts.push({
+			const account: Account = {
 				id: stored.id,
 				partition: stored.partition ?? null,
 				appData: { ...stored.appData, credentials } as AppDataJSON,
-			})
+			}
+			accounts.push(account)
+			// Window URLs of this account are served from its own origin
+			addInternalOrigin(String(account.appData.serverUrl ?? ''))
 		}
 	} catch (error) {
 		if (error instanceof Error && 'code' in error && error.code !== 'ENOENT') {
@@ -283,6 +287,7 @@ export function upsertAccount(appData: AppDataJSON, options: { forcePartition?: 
 
 	if (existing) {
 		existing.appData = appData
+		addInternalOrigin(String(appData.serverUrl ?? ''))
 		saveAccounts()
 		return existing
 	}
@@ -297,6 +302,7 @@ export function upsertAccount(appData: AppDataJSON, options: { forcePartition?: 
 
 	const account: Account = { id, partition, appData }
 	accounts.push(account)
+	addInternalOrigin(String(appData.serverUrl ?? ''))
 	saveAccounts()
 	return account
 }

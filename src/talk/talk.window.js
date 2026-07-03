@@ -101,7 +101,7 @@ function createTalkWindow(account) {
 
 	setupTray(window, account)
 
-	window.loadURL(getWindowUrl('talk') + '#/apps/spreed')
+	window.loadURL(getWindowUrl('talk', account?.appData?.serverUrl) + '#/apps/spreed')
 
 	return window
 }
