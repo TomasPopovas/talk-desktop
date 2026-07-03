@@ -30,8 +30,11 @@ let [prefilledServer, prefilledUser] = atIndex === -1
 	? [prefilledAccount, '']
 	: [prefilledAccount.slice(atIndex + 1), prefilledAccount.slice(0, atIndex)]
 
-const rawServerUrl = ref(BUILD_CONFIG.domain ?? prefilledServer)
-const enforceDomain = Boolean(BUILD_CONFIG.domain && BUILD_CONFIG.enforceDomain)
+// In the "add account" flow the branded domain must not be enforced:
+// the user is adding a DIFFERENT server, so start with an empty editable
+// field and do not auto-start the login flow.
+const rawServerUrl = ref(isAddMode ? '' : (BUILD_CONFIG.domain ?? prefilledServer))
+const enforceDomain = Boolean(BUILD_CONFIG.domain && BUILD_CONFIG.enforceDomain) && !isAddMode
 
 const allowReset = computed(() => !!(rawServerUrl.value && !enforceDomain))
 
@@ -87,7 +90,11 @@ function reset() {
 	stateText.value = ''
 	prefilledServer = ''
 	prefilledUser = ''
-	setAppConfigValue('accounts', [])
+	// In add mode the reset button only clears the input field:
+	// do not drop the "last used" hints of already logged-in accounts.
+	if (!isAddMode) {
+		setAppConfigValue('accounts', [])
+	}
 }
 
 /**
