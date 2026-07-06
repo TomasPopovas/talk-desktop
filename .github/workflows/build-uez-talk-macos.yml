@@ -57,6 +57,9 @@ jobs:
       - name: npm ci (spreed)
         working-directory: spreed
         run: npm ci --no-audit --no-fund
+        
+      - name: Install appdmg (macOS-only dmg builder)
+        run: npm install appdmg --no-save
 
       - name: Build app and make dmg
         run: |
