@@ -1,0 +1,170 @@
+name: original
+
+on:
+  workflow_dispatch:
+    inputs:
+      spreed_ref:
+        description: 'Ветка/тег nextcloud/spreed (встроенный Talk)'
+        default: 'stable34'
+        required: true
+
+concurrency:
+  group: build-original-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      TALK_PATH: ${{ github.workspace }}\spreed
+      CHANNEL: stable
+
+    steps:
+      - name: Checkout talk-desktop
+        uses: actions/checkout@v4
+
+      - name: Checkout nextcloud/spreed
+        uses: actions/checkout@v4
+        with:
+          repository: nextcloud/spreed
+          ref: ${{ inputs.spreed_ref || 'stable34' }}
+          path: spreed
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            spreed/package-lock.json
+
+      - name: Install WiX Toolset 3.14 (msi)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'C:\Program Files (x86)\WiX Toolset v3.14\bin\candle.exe')) {
+            choco install wixtoolset -y --no-progress
+          }
+          echo "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: npm ci (talk-desktop)
+        run: npm ci
+
+      - name: npm ci (spreed)
+        working-directory: spreed
+        run: npm ci --no-audit --no-fund
+
+      - name: Build app and make installers
+        shell: pwsh
+        run: |
+          npx electron-forge make --platform=win32 --arch=x64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path 'out')) { Write-Error 'Packaging silently failed: out/ was not created'; exit 1 }
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
+
+      - name: Zip portable folder
+        shell: pwsh
+        run: |
+          $dir = Get-ChildItem out -Directory | Where-Object { $_.Name -like '*win32-x64*' } | Select-Object -First 1
+          Compress-Archive -Path $dir.FullName -DestinationPath "out\Nextcloud.Talk-portable-windows-x64.zip"
+
+      - name: Upload installer exe (per-user)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Original-Talk-windows-installer-exe
+          path: out/make/**/*.exe
+          if-no-files-found: error
+
+      - name: Upload installer msi (GPO/SCCM)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Original-Talk-windows-installer-msi
+          path: out/make/**/*.msi
+          if-no-files-found: warn
+
+      - name: Upload portable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Original-Talk-windows-portable
+          path: out/Nextcloud.Talk-portable-windows-x64.zip
+          if-no-files-found: error
+
+  build-macos:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+    env:
+      TALK_PATH: ${{ github.workspace }}/spreed
+      CHANNEL: stable
+
+    steps:
+      - name: Checkout talk-desktop
+        uses: actions/checkout@v4
+
+      - name: Checkout nextcloud/spreed
+        uses: actions/checkout@v4
+        with:
+          repository: nextcloud/spreed
+          ref: ${{ inputs.spreed_ref || 'stable34' }}
+          path: spreed
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            spreed/package-lock.json
+
+      - name: npm ci (talk-desktop)
+        run: npm ci
+
+      - name: npm ci (spreed)
+        working-directory: spreed
+        run: npm ci --no-audit --no-fund
+
+      - name: Package app
+        run: |
+          npx electron-forge package --platform=darwin --arch=${{ matrix.arch }}
+          test -d out || { echo 'Packaging silently failed: out/ was not created'; exit 1; }
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      - name: Make dmg (hdiutil)
+        run: |
+          set -euo pipefail
+          APP_DIR=$(find out -maxdepth 1 -type d -name '*darwin*' | head -n 1)
+          APP_BUNDLE=$(find "$APP_DIR" -maxdepth 1 -name '*.app' | head -n 1)
+          echo "App bundle: $APP_BUNDLE"
+          STAGE=$(mktemp -d)
+          cp -R "$APP_BUNDLE" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "Nextcloud Talk" -srcfolder "$STAGE" -ov -format UDZO \
+            "out/Nextcloud.Talk-macos-${{ matrix.arch }}.dmg"
+
+      - name: Zip app bundle (portable)
+        run: |
+          set -euo pipefail
+          APP_DIR=$(find out -maxdepth 1 -type d -name '*darwin*' | head -n 1)
+          APP_BUNDLE=$(find "$APP_DIR" -maxdepth 1 -name '*.app' | head -n 1)
+          ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "out/Nextcloud.Talk-macos-${{ matrix.arch }}.zip"
+
+      - name: Upload dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: Original-Talk-macos-${{ matrix.arch }}-dmg
+          path: out/*.dmg
+          if-no-files-found: error
+
+      - name: Upload app zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Original-Talk-macos-${{ matrix.arch }}-app-zip
+          path: out/*.zip
+          if-no-files-found: error
