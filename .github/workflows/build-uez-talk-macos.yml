@@ -8,13 +8,12 @@ on:
         default: 'stable34'
         required: true
       arch:
-        description: 'Архитектура (arm64 - Apple Silicon, x64 - Intel, universal - обе)'
+        description: 'Архитектура (arm64 - Apple Silicon, x64 - Intel)'
         type: choice
         default: 'arm64'
         options:
           - arm64
           - x64
-          - universal
 
 concurrency:
   group: build-uez-macos-${{ github.ref }}
@@ -27,6 +26,7 @@ jobs:
     env:
       TALK_PATH: ${{ github.workspace }}/spreed
       CHANNEL: stable
+      BUILD_ARCH: ${{ inputs.arch || 'arm64' }}
 
     steps:
       - name: Checkout talk-desktop
@@ -57,33 +57,43 @@ jobs:
       - name: npm ci (spreed)
         working-directory: spreed
         run: npm ci --no-audit --no-fund
-        
-      - name: Install appdmg (macOS-only dmg builder)
-        run: npm install appdmg --no-save
 
-      - name: Build app and make dmg
+      - name: Package app
         run: |
-          npx electron-forge make --platform=darwin --arch=${{ inputs.arch || 'arm64' }}
+          npx electron-forge package --platform=darwin --arch="$BUILD_ARCH"
           test -d out || { echo 'Packaging silently failed: out/ was not created'; exit 1; }
         env:
           NODE_OPTIONS: --max-old-space-size=6144
 
-      - name: Zip app bundle (portable)
+      - name: Make dmg (hdiutil)
         run: |
+          set -euo pipefail
           APP_DIR=$(find out -maxdepth 1 -type d -name '*darwin*' | head -n 1)
           APP_BUNDLE=$(find "$APP_DIR" -maxdepth 1 -name '*.app' | head -n 1)
-          ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "out/UEZ.Talk-macos-${{ inputs.arch || 'arm64' }}.zip"
+          echo "App bundle: $APP_BUNDLE"
+          STAGE=$(mktemp -d)
+          cp -R "$APP_BUNDLE" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "UEZ Talk" -srcfolder "$STAGE" -ov -format UDZO \
+            "out/UEZ.Talk-macos-$BUILD_ARCH.dmg"
+
+      - name: Zip app bundle (portable)
+        run: |
+          set -euo pipefail
+          APP_DIR=$(find out -maxdepth 1 -type d -name '*darwin*' | head -n 1)
+          APP_BUNDLE=$(find "$APP_DIR" -maxdepth 1 -name '*.app' | head -n 1)
+          ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "out/UEZ.Talk-macos-$BUILD_ARCH.zip"
 
       - name: Upload dmg
         uses: actions/upload-artifact@v4
         with:
           name: UEZ-Talk-macos-dmg
-          path: out/make/**/*.dmg
+          path: out/*.dmg
           if-no-files-found: error
 
       - name: Upload app zip
         uses: actions/upload-artifact@v4
         with:
           name: UEZ-Talk-macos-app-zip
-          path: out/UEZ.Talk-macos-*.zip
+          path: out/*.zip
           if-no-files-found: error
