@@ -10,7 +10,7 @@
 "privacyUrl": "https://uez.ru",
 "windowsExe": true,
 "windowsMsi": true,
-"macosDmg": false,
+"macosDmg": true,
 "linuxFlatpak": false,
 "linuxZip": false
 }

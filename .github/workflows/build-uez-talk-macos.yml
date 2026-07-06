@@ -1,0 +1,86 @@
+name: Build UEZ Talk (macOS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      spreed_ref:
+        description: 'Ветка/тег nextcloud/spreed (встроенный Talk)'
+        default: 'stable34'
+        required: true
+      arch:
+        description: 'Архитектура (arm64 - Apple Silicon, x64 - Intel, universal - обе)'
+        type: choice
+        default: 'arm64'
+        options:
+          - arm64
+          - x64
+          - universal
+
+concurrency:
+  group: build-uez-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      TALK_PATH: ${{ github.workspace }}/spreed
+      CHANNEL: stable
+
+    steps:
+      - name: Checkout talk-desktop
+        uses: actions/checkout@v4
+
+      - name: Checkout nextcloud/spreed
+        uses: actions/checkout@v4
+        with:
+          repository: nextcloud/spreed
+          ref: ${{ inputs.spreed_ref || 'stable34' }}
+          path: spreed
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            spreed/package-lock.json
+
+      - name: Apply UEZ branding
+        run: bash branding/brand-talk-desktop.sh .
+
+      - name: npm ci (talk-desktop)
+        run: npm ci
+
+      - name: npm ci (spreed)
+        working-directory: spreed
+        run: npm ci --no-audit --no-fund
+
+      - name: Build app and make dmg
+        run: |
+          npx electron-forge make --platform=darwin --arch=${{ inputs.arch || 'arm64' }}
+          test -d out || { echo 'Packaging silently failed: out/ was not created'; exit 1; }
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      - name: Zip app bundle (portable)
+        run: |
+          APP_DIR=$(find out -maxdepth 1 -type d -name '*darwin*' | head -n 1)
+          APP_BUNDLE=$(find "$APP_DIR" -maxdepth 1 -name '*.app' | head -n 1)
+          ditto -c -k --sequesterRsrc --keepParent "$APP_BUNDLE" "out/UEZ.Talk-macos-${{ inputs.arch || 'arm64' }}.zip"
+
+      - name: Upload dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: UEZ-Talk-macos-dmg
+          path: out/make/**/*.dmg
+          if-no-files-found: error
+
+      - name: Upload app zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: UEZ-Talk-macos-app-zip
+          path: out/UEZ.Talk-macos-*.zip
+          if-no-files-found: error
