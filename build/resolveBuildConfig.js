@@ -45,6 +45,11 @@ function resolveBuildConfig() {
 	// Sanitized name - application name without non-alphanumeral characters
 	const applicationNameSanitized = buildConfig.applicationName.replace(/[^a-z0-9]/gi, '')
 
+	// Product name - used for executable, installers, shortcuts.
+	// Defaults to applicationName (in-app display name) if not overridden.
+	const productName = buildConfig.productName || buildConfig.applicationName
+	const productNameSanitized = productName.replace(/[^a-z0-9]/gi, '')
+
 	// Generate appId in DNS notation from domain
 	const appIdHost = buildConfig.domain
 		? new URL(buildConfig.domain).host.split('.').reverse().join('.')
@@ -65,9 +70,11 @@ function resolveBuildConfig() {
 		companyName: isBranded ? buildConfig.applicationName : 'Nextcloud GmbH',
 		copyright: (isBranded ? 'Copyright (c) {year}' : 'Copyright (c) {year} Nextcloud GmbH').replace('{year}', new Date().getFullYear()),
 		applicationNameSanitized,
+		productName,
+		productNameSanitized,
 		isPlainBackground: buildConfig.backgroundColor !== buildConfigDefaults.backgroundColor,
 		withThemingOverrides: buildConfig.primaryColor !== buildConfigDefaults.primaryColor || buildConfig.backgroundColor !== buildConfigDefaults.backgroundColor,
-		winSquirrelAppId: applicationNameSanitized, // Special case for Squirrel.Windows
+		winSquirrelAppId: productNameSanitized, // Special case for Squirrel.Windows
 		winUpgradeCode: UUIDv5(`${appIdHost}.talk`, TALK_DESKTOP_UUID),
 	}
 }

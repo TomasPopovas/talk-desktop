@@ -57,7 +57,7 @@ function generateDistName(platform, arch, ext) {
 	const archTitle = archTitles[arch] ?? arch
 	const CHANNEL = process.env.CHANNEL ?? 'stable'
 	const channel = CHANNEL !== 'stable' ? CHANNEL : ''
-	const name = BUILD_CONFIG.applicationName.replace(/[^a-z0-9]/gi, '.')
+	const name = BUILD_CONFIG.productName.replace(/[^a-z0-9]/gi, '.')
 
 	return [name, channel, platformTitle, archTitle].filter(Boolean).join('-') + ext
 }
@@ -199,7 +199,7 @@ module.exports = {
 	// https://electron.github.io/packager/main/interfaces/Options.html
 	packagerConfig: {
 		// Common
-		name: BUILD_CONFIG.applicationName,
+		name: BUILD_CONFIG.productName,
 		icon: path.join(__dirname, './img/icons/icon'),
 		appCopyright: BUILD_CONFIG.copyright,
 		asar: true,
@@ -233,11 +233,11 @@ module.exports = {
 		BUILD_CONFIG.windowsMsi && new MakerWix({
 			appUserModelId: BUILD_CONFIG.winAppId,
 			description: BUILD_CONFIG.description,
-			exe: `${BUILD_CONFIG.applicationName}.exe`,
-			name: BUILD_CONFIG.applicationName,
+			exe: `${BUILD_CONFIG.productName}.exe`,
+			name: BUILD_CONFIG.productName,
 			icon: path.join(__dirname, 'img/icons/icon.ico'),
 			manufacturer: BUILD_CONFIG.companyName,
-			shortName: BUILD_CONFIG.applicationNameSanitized,
+			shortName: BUILD_CONFIG.productNameSanitized,
 			upgradeCode: BUILD_CONFIG.winUpgradeCode,
 			arch: 'x64', // electron-wix-msi defaults to x86 and arm64 is not supported
 			// Pass the version explicitly
@@ -276,10 +276,10 @@ module.exports = {
 
 					// <Directory Name="app-{version}> -> <Component> -> <File Name="Nextcloud Talk.exe>
 					// Represents: C:/Program Files/Nextcloud Talk/app-{version}/Nextcloud Talk.exe
-					const $executableFile = $(`Directory[Name^="app-"] > Component > File[Name="${BUILD_CONFIG.applicationName}.exe"]`)
+					const $executableFile = $(`Directory[Name^="app-"] > Component > File[Name="${BUILD_CONFIG.productName}.exe"]`)
 					$('<firewall:FirewallException></firewall:FirewallException>').attr({
 						Id: $executableFile.attr('Id') + '_firewall_exception',
-						Name: BUILD_CONFIG.applicationName,
+						Name: BUILD_CONFIG.productName,
 						Description: BUILD_CONFIG.description,
 						Scope: 'any',
 						IgnoreFailure: 'yes',
@@ -304,12 +304,12 @@ module.exports = {
 			name: BUILD_CONFIG.winSquirrelAppId,
 			setupExe: generateDistName('win32', TARGET_ARCH, '.exe'),
 			setupMsi: generateDistName('win32', TARGET_ARCH, '.msi'),
-			exe: `${BUILD_CONFIG.applicationName}.exe`,
+			exe: `${BUILD_CONFIG.productName}.exe`,
 			// Covered by WiX
 			noMsi: true,
 
 			// Meta
-			title: BUILD_CONFIG.applicationName,
+			title: BUILD_CONFIG.productName,
 			authors: BUILD_CONFIG.companyName,
 			owners: BUILD_CONFIG.companyName,
 			description: BUILD_CONFIG.description,
@@ -332,7 +332,7 @@ module.exports = {
 			// https://github.com/LinusU/node-appdmg?tab=readme-ov-file#specification
 			additionalDMGOptions: {
 				// Background does not work when the title has spaces or special characters
-				title: BUILD_CONFIG.applicationNameSanitized,
+				title: BUILD_CONFIG.productNameSanitized,
 			},
 		}),
 

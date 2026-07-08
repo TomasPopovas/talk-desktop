@@ -8,8 +8,14 @@ import { refetchAppDataWithRetry } from '../app/appData.service.js'
 import { getAppConfigValue, initAppConfig, setAppConfigValue } from '../shared/appConfig.service.ts'
 import { initGlobals } from '../shared/globals/globals.js'
 import { applyAxiosInterceptors } from '../shared/setupWebPage.js'
+import { BUILD_CONFIG } from '../shared/build.config.ts'
 
 import '@global-styles/dist/icons.css'
+
+const subtitle = document.querySelector<HTMLDivElement>('.subtitle')
+if (subtitle) {
+	subtitle.textContent = BUILD_CONFIG.titleBarText || BUILD_CONFIG.applicationName
+}
 
 const quitButton = document.querySelector<HTMLButtonElement>('.quit')!
 quitButton.addEventListener('click', () => window.TALK_DESKTOP.quit())

@@ -65,7 +65,7 @@ app.setPath('userData', path.join(app.getPath('appData'), app.getName()))
 if (isWindows && process.env.NODE_ENV === 'production') {
 	if (isSquirrel) {
 		// Squirrel.Windows sets the AppUserModelId in the following way
-		app.setAppUserModelId(`com.squirrel.${BUILD_CONFIG.applicationNameSanitized}.${BUILD_CONFIG.applicationNameSanitized}`)
+		app.setAppUserModelId(`com.squirrel.${BUILD_CONFIG.winSquirrelAppId}.${BUILD_CONFIG.winSquirrelAppId}`)
 	} else {
 		// MSI installer - normal AppID
 		app.setAppUserModelId(BUILD_CONFIG.winAppId)

@@ -16,6 +16,19 @@ export type BuildConfigFile = {
 	applicationName: string
 
 	/**
+	 * Product name.
+	 * Used for the executable file name, installers, shortcuts and "Apps & Features".
+	 * Falls back to applicationName when not set.
+	 */
+	productName?: string
+
+	/**
+	 * Custom text shown in the window title bar next to the logo.
+	 * Falls back to applicationName when not set.
+	 */
+	titleBarText?: string
+
+	/**
 	 * Description.
 	 * Used in metadata and help.
 	 * Default: 'Official Desktop client for {applicationName}'
@@ -157,6 +170,11 @@ export type BuildConfigInferred = {
 	 * Application name without non-alphanumeral characters
 	 */
 	applicationNameSanitized: string
+
+	/**
+	 * Product name without non-alphanumeral characters
+	 */
+	productNameSanitized: string
 
 	/**
 	 * Whether to have theming backgroundMime='backgroundColor' (plain background color instead of an image).

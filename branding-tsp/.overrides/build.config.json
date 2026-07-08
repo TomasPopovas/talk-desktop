@@ -1,0 +1,18 @@
+{
+"applicationName": "TSP-Messenger",
+"productName": "TSP-Messenger-Client",
+"titleBarText": "TSP-Messenger",
+"description": "TSP-Messenger corporate messenger client",
+"domain": "https://cloud.okbtsp.com",
+"enforceDomain": true,
+"brandColor": "#1090C0",
+"brandGradient": "linear-gradient(40deg, #1090C0 0%, #20C0F0 100%)",
+"brandFontColor": "#FFFFFF",
+"helpUrl": "https://cloud.okbtsp.com",
+"privacyUrl": "https://cloud.okbtsp.com",
+"windowsExe": true,
+"windowsMsi": true,
+"macosDmg": true,
+"linuxFlatpak": false,
+"linuxZip": false
+}

@@ -12,5 +12,6 @@
 "windowsMsi": true,
 "macosDmg": false,
 "linuxFlatpak": false,
-"linuxZip": false
+"linuxZip": false,
+"titleBarText": "Корпоративный мессенджер"
 }
